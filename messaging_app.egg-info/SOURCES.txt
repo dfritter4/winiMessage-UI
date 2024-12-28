@@ -1,0 +1,14 @@
+setup.py
+bubbles/__init__.py
+bubbles/base_bubble.py
+bubbles/enhanced_text_bubble.py
+bubbles/image_bubble.py
+bubbles/message_bubble.py
+bubbles/resources.py
+bubbles/text_bubble.py
+bubbles/text_parser.py
+messaging_app.egg-info/PKG-INFO
+messaging_app.egg-info/SOURCES.txt
+messaging_app.egg-info/dependency_links.txt
+messaging_app.egg-info/requires.txt
+messaging_app.egg-info/top_level.txt
