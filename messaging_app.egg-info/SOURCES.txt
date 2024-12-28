@@ -7,8 +7,16 @@ bubbles/message_bubble.py
 bubbles/resources.py
 bubbles/text_bubble.py
 bubbles/text_parser.py
+config/__init__.py
+config/settings.py
+domain/__init__.py
+domain/interfaces.py
+domain/models.py
 messaging_app.egg-info/PKG-INFO
 messaging_app.egg-info/SOURCES.txt
 messaging_app.egg-info/dependency_links.txt
 messaging_app.egg-info/requires.txt
 messaging_app.egg-info/top_level.txt
+services/__init__.py
+services/core.py
+services/message_service.py
