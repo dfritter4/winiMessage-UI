@@ -9,28 +9,34 @@ from messaging_app.domain.interfaces import IEventBus, IStateManager
 from messaging_app.domain.models import Event, AppState, EventType
 
 class EventBus(IEventBus):
-    """
-    Event bus implementation for handling application-wide events.
-    Thread-safe implementation with support for both sync and async callbacks.
-    """
+    """Thread-safe event bus implementation with async support."""
     
     def __init__(self):
-        self._subscribers: Dict[EventType, List[Union[Callable[[Event], None], Callable[[Event], Any]]]] = {}
+        self._subscribers: Dict[EventType, List[Callable[[Event], Any]]] = {}
         self._lock = threading.Lock()
         self._logger = logging.getLogger(__name__)
         self._executor = ThreadPoolExecutor(max_workers=5)
         
-        # Ensure an event loop exists
+        # Ensure we have an event loop
         try:
             self._event_loop = asyncio.get_event_loop()
         except RuntimeError:
             self._event_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._event_loop)
-            # If no event loop is running, create a new one
-            self._event_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._event_loop)
-    
-    def subscribe(self, event_type: EventType, callback: Union[Callable[[Event], None], Callable[[Event], Any]]) -> None:
+
+    def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
+        """Ensure there's a running event loop for the current thread."""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                return asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return loop
+
+    def subscribe(self, event_type: EventType, callback: Callable[[Event], Any]) -> None:
         """Subscribe to a specific event type."""
         with self._lock:
             if event_type not in self._subscribers:
@@ -38,7 +44,7 @@ class EventBus(IEventBus):
             self._subscribers[event_type].append(callback)
             self._logger.debug(f"Added subscriber for {event_type}")
     
-    def unsubscribe(self, event_type: EventType, callback: Union[Callable[[Event], None], Callable[[Event], Any]]) -> None:
+    def unsubscribe(self, event_type: EventType, callback: Callable[[Event], Any]) -> None:
         """Unsubscribe from a specific event type."""
         with self._lock:
             if event_type in self._subscribers:
@@ -46,85 +52,45 @@ class EventBus(IEventBus):
                     self._subscribers[event_type].remove(callback)
                     self._logger.debug(f"Removed subscriber for {event_type}")
                 except ValueError:
-                    pass  # Callback wasn't registered
-    
+                    pass
+
     def publish(self, event: Event) -> None:
         """Publish an event to all subscribers."""
         subscribers = []
         with self._lock:
             if event.type in self._subscribers:
                 subscribers = self._subscribers[event.type].copy()
-        
+
         for callback in subscribers:
             try:
-                # Check if the callback is a coroutine function
                 if asyncio.iscoroutinefunction(callback):
-                    # Run the coroutine in a thread pool
-                    self._executor.submit(self._run_async_callback, callback, event)
+                    # Handle async callbacks
+                    loop = self._ensure_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self._run_async_callback(callback, event))
+                    else:
+                        self._executor.submit(self._run_async_in_new_loop, callback, event)
                 else:
-                    # Call synchronous callback
+                    # Handle synchronous callbacks
                     callback(event)
             except Exception as e:
                 self._logger.error(f"Error in event handler: {e}", exc_info=True)
-    
-    def _run_async_callback(self, callback, event):
-        """Run an async callback in a separate thread."""
+
+    async def _run_async_callback(self, callback: Callable, event: Event) -> None:
+        """Run an async callback safely."""
         try:
-            # Create a new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                # Run the coroutine to completion
-                result = loop.run_until_complete(callback(event))
-                return result
-            except Exception as e:
-                self._logger.error(f"Error running async callback: {e}", exc_info=True)
-            finally:
-                # Close the loop
-                loop.close()
+            await callback(event)
         except Exception as e:
-            self._logger.error(f"Unexpected error in async callback execution: {e}", exc_info=True)
-            
-    def _schedule_coroutine(self, callback, event):
-        """Safely schedule a coroutine."""
-        def run_callback():
-            try:
-                # Create a new loop for this thread if needed
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Run the coroutine
-                loop.run_until_complete(callback(event))
-                
-                # Close the loop
-                loop.close()
-            except Exception as e:
-                self._logger.error(f"Error running async callback: {e}", exc_info=True)
-        
-        # Run in a separate thread to avoid blocking
-        threading.Thread(target=run_callback, daemon=True).start()
-        """Publish an event to all subscribers."""
-        self._logger.info(f"Publishing event: {event.type}")
-        subscribers = []
-        with self._lock:
-            if event.type in self._subscribers:
-                subscribers = self._subscribers[event.type].copy()
-                self._logger.info(f"Number of subscribers for {event.type}: {len(subscribers)}")
-        
-        for callback in subscribers:
-            try:
-                # Check if the callback is a coroutine
-                if asyncio.iscoroutinefunction(callback):
-                    self._logger.info(f"Scheduling async callback for {event.type}")
-                    # Schedule the coroutine to run
-                    asyncio.create_task(callback(event))
-                else:
-                    # Call synchronous callback
-                    self._logger.info(f"Calling sync callback for {event.type}")
-                    callback(event)
-            except Exception as e:
-                self._logger.error(f"Error in event handler: {e}", exc_info=True)
+            self._logger.error(f"Error in async callback: {e}", exc_info=True)
+
+    def _run_async_in_new_loop(self, callback: Callable, event: Event) -> None:
+        """Run an async callback in a new event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run_async_callback(callback, event))
+        finally:
+            loop.close()
 
 class StateManager(IStateManager):
     """

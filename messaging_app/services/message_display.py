@@ -11,26 +11,30 @@ from messaging_app.bubbles import TextBubble, ImageBubble, EnhancedTextBubble
 from messaging_app.ui import ModernScrolledText
 
 class MessageDisplayManager(IMessageDisplay):
-    def __init__(
-        self,
-        container: ModernScrolledText,
-        config: AppConfig,
-        event_bus: IEventBus
-    ):
+    def __init__(self, container: ModernScrolledText, config: AppConfig, event_bus: IEventBus):
         self.container = container
         self.config = config
         self.event_bus = event_bus
         self.logger = logging.getLogger(__name__)
         self._current_thread_guid: Optional[str] = None
-        self._message_widgets: Dict[str, Dict[str, tk.Widget]] = {}  # thread_guid -> {message_id -> widget}
+        self._displayed_guids: Set[str] = set()  # Track displayed message GUIDs
+        self._message_widgets: Dict[str, Dict[str, tk.Widget]] = {}
 
     def display_message(self, message: Message, thread_guid: Optional[str] = None) -> None:
-        """Display a message in the current thread's chat window."""
+        """Display a message in the current thread's chat window with guid-based deduplication."""
         if thread_guid is None:
             thread_guid = self._current_thread_guid
             
         if thread_guid != self._current_thread_guid:
             self.logger.debug(f"Skipping display of message for non-active thread {thread_guid}")
+            return
+
+        if not message.guid:
+            self.logger.warning("Message has no GUID, skipping display")
+            return
+            
+        if message.guid in self._displayed_guids:
+            self.logger.debug(f"Skipping duplicate message: {message.guid}")
             return
 
         if not message.text and not message.attachments:
@@ -110,7 +114,8 @@ class MessageDisplayManager(IMessageDisplay):
                 # Store the widget reference
                 if thread_guid not in self._message_widgets:
                     self._message_widgets[thread_guid] = {}
-                self._message_widgets[thread_guid][message.message_id or str(message.timestamp)] = container
+                self._message_widgets[thread_guid][message.guid] = container
+                self._displayed_guids.add(message.guid)
 
             except Exception as e:
                 self.logger.error(f"Error displaying message: {e}", exc_info=True)
@@ -124,15 +129,13 @@ class MessageDisplayManager(IMessageDisplay):
     def clear_display(self) -> None:
         """Clear all messages from the display."""
         try:
-            # Remove all widgets from the scrollable frame
             for widget in self.container.scrollable_frame.winfo_children():
                 widget.destroy()
             
-            # Clear the message widgets dictionary for the current thread
             if self._current_thread_guid in self._message_widgets:
                 self._message_widgets[self._current_thread_guid].clear()
-
-            # Reset scroll region
+                
+            self._displayed_guids.clear()
             self.container._on_frame_configure()
 
         except Exception as e:

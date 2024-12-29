@@ -30,6 +30,7 @@ class Message:
     direction: str = "incoming"  # "incoming" or "outgoing"
     attachments: List[Attachment] = None
     message_id: Optional[str] = None
+    guid: Optional[str] = None
 
     def __post_init__(self):
         if self.attachments is None:

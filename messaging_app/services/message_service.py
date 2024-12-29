@@ -16,6 +16,7 @@ from messaging_app.domain import (
 )
 from messaging_app.config.settings import AppConfig
 from messaging_app.domain.models import Attachment
+from messaging_app.utils.timestamp_utils import normalize_timestamp
 
 class MessageService(IMessageService):
     def __init__(self, config: AppConfig, event_bus: IEventBus):
@@ -113,25 +114,25 @@ class MessageService(IMessageService):
     def _process_message(self, msg: Dict) -> Optional[Message]:
         """Process a raw message dictionary into a Message object."""
         try:
-            # Process attachments
+            # Safely get attachments
             attachments = []
-            for attachment_data in msg.get("attachments", []):
-                attachments.append(Attachment(
-                    url=attachment_data.get("attachment_url", ""),
-                    mime_type=attachment_data.get("mime_type", "")
-                ))
+            raw_attachments = msg.get("attachments", [])
             
-            # Convert timestamp
-            try:
-                if isinstance(msg.get("timestamp"), str):
-                    parsed_timestamp = dateutil.parser.parse(msg["timestamp"])
-                    timestamp = parsed_timestamp.timestamp()
-                else:
-                    timestamp = float(msg.get("timestamp", datetime.now().timestamp()))
-            except (TypeError, ValueError):
+            # Handle attachments if they exist
+            if raw_attachments and isinstance(raw_attachments, list):
+                for attachment_data in raw_attachments:
+                    if isinstance(attachment_data, dict):
+                        attachments.append(Attachment(
+                            url=attachment_data.get("attachment_url", ""),
+                            mime_type=attachment_data.get("mime_type", "")
+                        ))
+            
+            # Use existing timestamp normalization
+            timestamp = normalize_timestamp(msg.get("timestamp"))
+            if timestamp is None:
                 timestamp = datetime.now().timestamp()
-
-            # Create message object
+            
+            # Create message object using correct field names
             return Message(
                 text=str(msg.get("text", "")),
                 sender_name=str(msg.get("sender_name", "Unknown")),
@@ -139,14 +140,27 @@ class MessageService(IMessageService):
                 thread_name=msg.get("thread_name"),
                 direction=msg.get("direction", "incoming"),
                 attachments=attachments,
-                message_id=msg.get("message_id")
+                message_id=msg.get("message_id"),  # Using existing message_id field
+                guid=str(msg.get("guid", ""))      # Using new guid field
             )
         except Exception as e:
-            print(f"Error processing message: {e}")
+            self.logger.error(f"Error processing message: {e}")
+            self.logger.debug(f"Problematic message data: {msg}")
             return None
         
+
+    def _get_message_key(self, message: Message) -> str:
+        """Generate a unique key for message deduplication."""
+        # If message_id is available, use it as it's the most reliable
+        if message.message_id:
+            return f"{message.message_id}"
+        
+        # Otherwise, create a composite key with millisecond precision
+        timestamp_ms = int(message.timestamp * 1000)  # Convert to milliseconds
+        return f"{message.sender_name}:{message.text}:{timestamp_ms}"
+    
     async def poll_messages(self) -> Dict[str, List[Message]]:
-        """Poll for new messages across all threads."""
+        """Poll for new messages across all threads with guid-based deduplication."""
         try:
             self.logger.info("Polling for messages")
             
@@ -158,11 +172,7 @@ class MessageService(IMessageService):
                     response.raise_for_status()
                     data = await response.json()
                     
-                    self.logger.info(f"Received message data: {data}")
-                    
                     threads_data = data.get("threads", {})
-                    self.logger.info(f"Number of threads: {len(threads_data)}")
-                    
                     updates: Dict[str, List[Message]] = {}
 
                     for thread_guid, messages in threads_data.items():
@@ -170,32 +180,20 @@ class MessageService(IMessageService):
                             self._message_cache[thread_guid] = []
 
                         thread_updates = []
-                        existing_keys = {
-                            f"{m.sender_name}:{m.text}:{m.timestamp}" 
-                            for m in self._message_cache[thread_guid]
-                        }
+                        existing_guids = {m.guid for m in self._message_cache[thread_guid]}
 
                         for msg in messages:
-                            # Use the new _process_message method
                             message = self._process_message(msg)
-                            
-                            # Skip None messages
-                            if not message:
+                            if not message or not message.guid:
                                 continue
-                            
-                            cache_key = (
-                                f"{message.sender_name}:"
-                                f"{message.text}:"
-                                f"{message.timestamp}"
-                            )
-
-                            if cache_key not in existing_keys:
+                                
+                            if message.guid not in existing_guids:
                                 thread_updates.append(message)
                                 self._message_cache[thread_guid].append(message)
 
                         if thread_updates:
                             updates[thread_guid] = thread_updates
-                            # Publish event for each new message
+                            # Publish events for new messages
                             for message in thread_updates:
                                 self.logger.info(f"Publishing new message: {message}")
                                 self.event_bus.publish(Event(

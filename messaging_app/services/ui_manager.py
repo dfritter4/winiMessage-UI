@@ -3,7 +3,7 @@
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import logging
-from typing import Optional, Any, Callable
+from typing import List, Optional, Any, Callable
 
 from messaging_app.domain import IEventBus, Event, EventType
 
@@ -18,6 +18,7 @@ class UIManager:
         self.event_bus = event_bus
         self.logger = logging.getLogger(__name__)
         self._dialog_active = False
+        self._listbox = None  # Reference to the chat listbox
 
     def show_error(self, message: str, title: str = "Error") -> None:
         """Display an error message dialog."""
@@ -77,6 +78,33 @@ class UIManager:
             self.logger.error(f"Error showing input dialog: {e}", exc_info=True)
             self._dialog_active = False
             return None
+
+    def set_chat_listbox(self, listbox: tk.Listbox) -> None:
+        """Set the reference to the chat listbox."""
+        self._listbox = listbox
+
+    def update_thread_list(self, thread_names: List[str]) -> None:
+        """Update the chat list with thread names."""
+        if not self._listbox:
+            self.logger.warning("No listbox reference set. Cannot update thread list.")
+            return
+
+        try:
+            # Clear existing items
+            self._listbox.delete(0, tk.END)
+            
+            # Add new items
+            for name in thread_names:
+                self._listbox.insert(tk.END, name)
+        except Exception as e:
+            self.logger.error(f"Error updating thread list: {e}", exc_info=True)
+            self.event_bus.publish(Event(
+                EventType.ERROR_OCCURRED,
+                {
+                    "error": str(e),
+                    "context": "thread_list_update"
+                }
+            ))
 
     def confirm_action(self, action: str, detail: str = "") -> bool:
         """Display a confirmation dialog for an action."""

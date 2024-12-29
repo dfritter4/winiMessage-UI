@@ -169,6 +169,14 @@ class ThreadManager(IThreadManager):
     async def update_thread(self, guid: str, messages: List[Message]) -> None:
         """Update a thread with new messages."""
         try:
+            if not guid:
+                self._logger.warning("Received empty thread GUID")
+                return
+                
+            if not messages:
+                self._logger.debug(f"No messages to update for thread {guid}")
+                return
+            
             self._logger.debug(f"Updating thread {guid} with {len(messages)} messages")
             
             # Create thread if it doesn't exist
@@ -183,7 +191,8 @@ class ThreadManager(IThreadManager):
             
             # Add new messages
             for message in messages:
-                thread.add_message(message)
+                if message is not None:  # Explicit None check
+                    thread.add_message(message)
             
             # Update application state
             current_state = self._state_manager.get_state()
@@ -213,7 +222,6 @@ class ThreadManager(IThreadManager):
                     "context": "thread_update"
                 }
             ))
-            raise
 
     async def delete_thread(self, guid: str) -> None:
         """Delete a thread."""
