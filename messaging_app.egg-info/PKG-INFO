@@ -5,6 +5,5 @@ Requires-Python: >=3.7
 Requires-Dist: aiohttp
 Requires-Dist: pillow
 Requires-Dist: requests
-Requires-Dist: tkinter
 Requires-Dist: typing
 Requires-Dist: dataclasses

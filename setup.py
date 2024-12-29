@@ -8,7 +8,6 @@ setup(
         'aiohttp',
         'pillow',
         'requests',
-        'tkinter',
         'typing',
         'dataclasses'
     ],

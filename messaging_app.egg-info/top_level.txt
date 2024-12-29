@@ -1,4 +1,1 @@
-bubbles
-config
-domain
-services
+messaging_app
