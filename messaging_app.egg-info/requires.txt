@@ -4,4 +4,4 @@ requests
 typing
 dataclasses
 python-dateutil
-pyheif
+pillow-heif

@@ -108,42 +108,42 @@ class ImageContent(IBubbleContent):
                 response = requests.get(image_url, timeout=5)
                 response.raise_for_status()
                 
-                # Try different image libraries for HEIC support
+                # Try HEIF support with pillow-heif
                 try:
-                    # First, try Pillow
+                    import pillow_heif
+                    pillow_heif.register_heif_opener()
                     image_data = Image.open(io.BytesIO(response.content))
-                except Exception as pillow_error:
-                    try:
-                        # If Pillow fails, try pyheif for HEIC support
-                        import pyheif
-                        heif_file = pyheif.read(response.content)
-                        image_data = Image.frombytes(
-                            heif_file.mode, 
-                            heif_file.size, 
-                            heif_file.data,
-                            "raw",
-                            heif_file.mode,
-                            heif_file.stride,
-                        )
-                    except ImportError:
-                        print("pyheif not installed. HEIC support limited.")
-                        raise pillow_error
+                except (ImportError, ModuleNotFoundError):
+                    # If pillow-heif is not installed, fall back to Pillow
+                    image_data = Image.open(io.BytesIO(response.content))
                 
                 # Cache original image data
                 image_cache[f"{image_url}_original"] = response.content
                 
                 return image_data
             
-            # Fallback to local file handling (previous implementation)
+            # Fallback to local file handling
             if image_url.startswith('file://'):
                 file_path = unquote(image_url[7:])
                 if file_path.startswith('~'):
                     file_path = os.path.expanduser(file_path)
-                return Image.open(file_path)
+                
+                # Try HEIF support for local files
+                try:
+                    import pillow_heif
+                    pillow_heif.register_heif_opener()
+                    return Image.open(file_path)
+                except (ImportError, ModuleNotFoundError):
+                    return Image.open(file_path)
             
             # Local path handling as a last resort
             if os.path.exists(image_url):
-                return Image.open(image_url)
+                try:
+                    import pillow_heif
+                    pillow_heif.register_heif_opener()
+                    return Image.open(image_url)
+                except (ImportError, ModuleNotFoundError):
+                    return Image.open(image_url)
             
             # If no valid image source is found
             print(f"No valid image source found for URL: {image_url}")

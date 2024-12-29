@@ -11,7 +11,7 @@ setup(
         'typing',
         'dataclasses',
         'python-dateutil',
-        'pyheif'
+        'pillow-heif'
     ],
     python_requires='>=3.7',
 )

@@ -1,6 +1,7 @@
 import tkinter as tk
 import logging
 from typing import Optional, Dict
+from messaging_app.bubbles.text_handlers import EnhancedTextContent
 from messaging_app.domain import IMessageDisplay, Message, IEventBus, Event, EventType
 from messaging_app.config import AppConfig
 from messaging_app.bubbles import TextBubble, ImageBubble, EnhancedTextBubble
@@ -45,6 +46,8 @@ class MessageDisplayManager(IMessageDisplay):
                 # Create appropriate bubble type
                 try:
                     if is_image:
+                        self.logger.info(f"Creating image bubble: {message.text}")
+
                         # Import the style if not already imported
                         from messaging_app.bubbles.base.style import DefaultBubbleStyle
                         
@@ -65,10 +68,11 @@ class MessageDisplayManager(IMessageDisplay):
                         from messaging_app.bubbles.base.style import DefaultBubbleStyle
                         style = DefaultBubbleStyle()
                         
+                        self.logger.info(f"Creating message bubble: {message.text}")
                         bubble = EnhancedTextBubble(
                             container,
-                            content=message.text,
-                            style=style,
+                            EnhancedTextContent(message.text),  # Wrap text in EnhancedTextContent
+                            DefaultBubbleStyle(self.config),
                             is_outgoing=message.direction == "outgoing",
                             timestamp=message.timestamp,
                             sender_name=message.sender_name

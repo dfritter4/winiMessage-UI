@@ -6,6 +6,11 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 
+from messaging_app.bubbles import (
+    EnhancedTextContent,  # Add this import
+    TextBubbleFactory     # Optional, but might be useful
+)
+
 from messaging_app.config import AppConfig, load_config
 from messaging_app.domain import Event, EventType, ConnectionState
 from messaging_app.ui import (

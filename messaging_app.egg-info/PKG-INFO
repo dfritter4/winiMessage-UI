@@ -8,4 +8,4 @@ Requires-Dist: requests
 Requires-Dist: typing
 Requires-Dist: dataclasses
 Requires-Dist: python-dateutil
-Requires-Dist: pyheif
+Requires-Dist: pillow-heif
