@@ -22,70 +22,93 @@ class MessageDisplayManager(IMessageDisplay):
 
     def display_message(self, message: Message) -> None:
         """Display a single message in the UI."""
+        def _do_display():
+            try:
+                # Create container frame for the message
+                container = tk.Frame(
+                    self.container.scrollable_frame,
+                    bg=self.config.colors.background
+                )
+                container.pack(
+                    fill="x",
+                    padx=15,
+                    pady=5
+                )
+
+                # Determine if this is an image message
+                is_image = (
+                    message.attachment_path is not None and 
+                    any(message.attachment_path.lower().endswith(ext) 
+                        for ext in ['.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif'])
+                )
+
+                # Create appropriate bubble type
+                try:
+                    if is_image:
+                        # Import the style if not already imported
+                        from messaging_app.bubbles.base.style import DefaultBubbleStyle
+                        
+                        # Create style instance
+                        style = DefaultBubbleStyle()
+                        
+                        bubble = ImageBubble(
+                            container,
+                            content=message.text or "Image",
+                            image_url=message.attachment_url,  # Use server-provided URL
+                            style=style,
+                            is_outgoing=message.direction == "outgoing",
+                            timestamp=message.timestamp,
+                            sender_name=message.sender_name
+                        )
+                    else:
+                        # Similar modification for text bubbles
+                        from messaging_app.bubbles.base.style import DefaultBubbleStyle
+                        style = DefaultBubbleStyle()
+                        
+                        bubble = EnhancedTextBubble(
+                            container,
+                            content=message.text,
+                            style=style,
+                            is_outgoing=message.direction == "outgoing",
+                            timestamp=message.timestamp,
+                            sender_name=message.sender_name
+                        )
+                except Exception as bubble_error:
+                    self.logger.error(f"Error creating bubble: {bubble_error}", exc_info=True)
+                    return
+
+                bubble.pack(
+                    side="right" if message.direction == "outgoing" else "left",
+                    fill="none",
+                    expand=False
+                )
+
+                # Store widget reference
+                message_id = f"{message.sender_name}:{message.timestamp}"
+                self._message_widgets[message_id] = container
+
+                # Update container
+                self.container.scrollable_frame.update_idletasks()
+                self.container._on_frame_configure()
+
+                # Publish message displayed event
+                self.event_bus.publish(Event(
+                    EventType.MESSAGE_DISPLAYED,
+                    {"message_id": message_id}
+                ))
+
+            except Exception as e:
+                self.logger.error(f"Unexpected error displaying message: {e}", exc_info=True)
+                self.event_bus.publish(Event(
+                    EventType.ERROR_OCCURRED,
+                    {"error": str(e), "context": "message_display"}
+                ))
+        
+        # Ensure UI update happens on main thread
         try:
-            # Create container frame for the message
-            container = tk.Frame(
-                self.container.scrollable_frame,
-                bg=self.config.colors.background
-            )
-            container.pack(
-                fill="x",
-                padx=15,
-                pady=5
-            )
-
-            # Determine if this is an image message
-            is_image = (
-                message.attachment_url is not None and
-                any(message.attachment_url.lower().endswith(ext)
-                    for ext in ['.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif'])
-            )
-
-            # Create appropriate bubble type
-            if is_image:
-                bubble = ImageBubble(
-                    container,
-                    message.text,
-                    message.attachment_url,
-                    is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=message.sender_name
-                )
-            else:
-                bubble = EnhancedTextBubble(
-                    container,
-                    message.text,
-                    is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=message.sender_name
-                )
-
-            bubble.pack(
-                side="right" if message.direction == "outgoing" else "left",
-                fill="none",
-                expand=False
-            )
-
-            # Store widget reference
-            message_id = f"{message.sender_name}:{message.timestamp}"
-            self._message_widgets[message_id] = container
-
-            # Update container
-            self.container.scrollable_frame.update_idletasks()
-            self.container._on_frame_configure()
-
-            # Publish message displayed event
-            self.event_bus.publish(Event(
-                EventType.MESSAGE_DISPLAYED,
-                {"message_id": message_id}
-            ))
-
+            self.container.after(0, _do_display)
         except Exception as e:
-            self.logger.error(f"Error displaying message: {e}", exc_info=True)
-            self.event_bus.publish(Event(
-                EventType.ERROR_OCCURRED,
-                {"error": str(e), "context": "message_display"}
-            ))
+            self.logger.error(f"Error scheduling message display: {e}", exc_info=True)
 
     def clear_display(self) -> None:
         """Clear all messages from the display."""

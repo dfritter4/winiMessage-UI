@@ -52,6 +52,16 @@ class ThreadManager(IThreadManager):
                 for guid, thread in threads.items()
             }
             
+            # Populate chat list
+            # If you have a method to update the chat list, call it here
+            self._event_bus.publish(Event(
+                EventType.THREAD_INITIALIZED,
+                {
+                    "threads": list(threads.keys()),
+                    "thread_names": list(self._thread_names.values())
+                }
+            ))
+            
             # Update application state
             current_state = self._state_manager.get_state()
             self._state_manager.update_state(AppState(
@@ -92,9 +102,13 @@ class ThreadManager(IThreadManager):
     async def get_thread_by_name(self, name: str) -> Optional[Thread]:
         """Get a thread by its name."""
         try:
+            # Find thread with matching name
             for thread in self._threads.values():
                 if thread.name == name:
                     return thread
+            
+            # If not found, log and return None
+            self._logger.warning(f"No thread found with name: {name}")
             return None
         except Exception as e:
             self._logger.error(f"Error getting thread by name {name}: {e}", exc_info=True)

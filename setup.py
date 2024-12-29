@@ -9,7 +9,9 @@ setup(
         'pillow',
         'requests',
         'typing',
-        'dataclasses'
+        'dataclasses',
+        'python-dateutil',
+        'pyheif'
     ],
     python_requires='>=3.7',
 )

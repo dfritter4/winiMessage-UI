@@ -1,9 +1,10 @@
-import asyncio
+import os
 import aiohttp
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 
+import dateutil
 
 from messaging_app.domain import (
     IMessageService,
@@ -76,9 +77,56 @@ class MessageService(IMessageService):
             ))
             raise
 
+    def _process_message(self, msg: Dict) -> Optional[Message]:
+        """Process a raw message dictionary into a Message object."""
+        try:
+            # Prioritize attachment_url if available
+            attachment_path = msg.get("attachment_path")
+            attachment_url = msg.get("attachment_url")
+            
+            # Default text to attachment filename or a generic description
+            if not msg.get("text") and attachment_path:
+                text = os.path.basename(attachment_path)
+                # Remove file extension if it's an image
+                if text.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif')):
+                    text = "Image"
+            else:
+                text = str(msg.get("text", "")).strip()
+
+            # Skip entirely empty messages
+            if not text and not (attachment_path or attachment_url):
+                return None
+
+            # Convert timestamp to float
+            try:
+                # Use dateutil to parse various timestamp formats
+                if isinstance(msg.get("timestamp"), str):
+                    parsed_timestamp = dateutil.parser.parse(msg["timestamp"])
+                    timestamp = parsed_timestamp.timestamp()
+                else:
+                    timestamp = float(msg.get("timestamp", datetime.now().timestamp()))
+            except (TypeError, ValueError):
+                timestamp = datetime.now().timestamp()
+
+            return Message(
+                text=text or "Attachment",
+                sender_name=str(msg.get("sender_name", "Unknown")),
+                timestamp=timestamp,
+                thread_name=msg.get("thread_name"),
+                direction=msg.get("direction", "incoming"),
+                attachment_path=attachment_path,
+                attachment_url=attachment_url,
+                message_id=msg.get("message_id")
+            )
+        except Exception as e:
+            print(f"Error processing message: {e}")
+            return None
+        
     async def poll_messages(self) -> Dict[str, List[Message]]:
         """Poll for new messages across all threads."""
         try:
+            self.logger.info("Polling for messages")
+            
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{self.config.network.server_url}/messages",
@@ -87,7 +135,11 @@ class MessageService(IMessageService):
                     response.raise_for_status()
                     data = await response.json()
                     
+                    self.logger.info(f"Received message data: {data}")
+                    
                     threads_data = data.get("threads", {})
+                    self.logger.info(f"Number of threads: {len(threads_data)}")
+                    
                     updates: Dict[str, List[Message]] = {}
 
                     for thread_guid, messages in threads_data.items():
@@ -101,22 +153,20 @@ class MessageService(IMessageService):
                         }
 
                         for msg in messages:
+                            # Use the new _process_message method
+                            message = self._process_message(msg)
+                            
+                            # Skip None messages
+                            if not message:
+                                continue
+                            
                             cache_key = (
-                                f"{msg.get('sender_name', 'Unknown')}:"
-                                f"{msg.get('text', '')}:"
-                                f"{msg.get('timestamp', datetime.now().timestamp())}"
+                                f"{message.sender_name}:"
+                                f"{message.text}:"
+                                f"{message.timestamp}"
                             )
 
                             if cache_key not in existing_keys:
-                                message = Message(
-                                    text=str(msg.get("text", "")),
-                                    sender_name=str(msg.get("sender_name", "Unknown")),
-                                    timestamp=msg.get("timestamp", datetime.now().timestamp()),
-                                    thread_name=msg.get("thread_name"),
-                                    direction=msg.get("direction", "incoming"),
-                                    attachment_path=msg.get("attachment_path"),
-                                    attachment_url=msg.get("attachment_url")
-                                )
                                 thread_updates.append(message)
                                 self._message_cache[thread_guid].append(message)
 
@@ -124,6 +174,7 @@ class MessageService(IMessageService):
                             updates[thread_guid] = thread_updates
                             # Publish event for each new message
                             for message in thread_updates:
+                                self.logger.info(f"Publishing new message: {message}")
                                 self.event_bus.publish(Event(
                                     EventType.MESSAGE_RECEIVED,
                                     {"thread_guid": thread_guid, "message": message}

@@ -1,6 +1,8 @@
 import tkinter as tk
 from typing import Optional
 from datetime import datetime
+
+import dateutil
 from ..interfaces import IBubbleStyle, IBubbleContent, IBubbleDrawer
 from .style import DefaultBubbleStyle
 from .drawer import DefaultBubbleDrawer
@@ -113,13 +115,22 @@ class BaseBubble(tk.Canvas):
         return 0
     
     def _add_timestamp(self,
-                      x: int,
-                      width: int,
-                      y_position: int) -> None:
+                   x: int,
+                   width: int,
+                   y_position: int) -> None:
         """Add timestamp to the bubble."""
         if self.timestamp:
             try:
-                time_str = datetime.fromtimestamp(self.timestamp).strftime("%I:%M %p")
+                # Try parsing the timestamp string
+                if isinstance(self.timestamp, str):
+                    # Use dateutil to parse various timestamp formats
+                    parsed_timestamp = dateutil.parser.parse(self.timestamp)
+                    timestamp = parsed_timestamp.timestamp()
+                else:
+                    # Ensure it's a float
+                    timestamp = float(self.timestamp)
+                
+                time_str = datetime.fromtimestamp(timestamp).strftime("%I:%M %p")
                 if time_str.startswith("0"):
                     time_str = time_str[1:]
                 self.create_text(

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import asyncio
 import logging
+import threading
 import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
@@ -82,11 +84,31 @@ class MessagingApp:
         # Start initialization
         self.root.after(100, self._initialize_async)
 
+        self.logger = logging.getLogger(__name__)
+
     def _setup_event_listeners(self) -> None:
         """Set up listeners for application events."""
         self.event_bus.subscribe(EventType.STATE_CHANGED, self._on_state_changed)
         self.event_bus.subscribe(EventType.DISPLAY_ERROR, self._on_display_error)
         self.event_bus.subscribe(EventType.UI_REFRESH_REQUESTED, self._on_ui_refresh)
+        
+        # Add this new event listener
+        self.event_bus.subscribe(EventType.THREAD_INITIALIZED, self._on_threads_initialized)
+
+    def _on_threads_initialized(self, event: Event) -> None:
+        """Populate chat list when threads are initialized."""
+        try:
+            thread_names = event.data.get("thread_names", [])
+            
+            # Clear existing items
+            self.chat_listbox.delete(0, tk.END)
+            
+            # Add thread names to listbox
+            for name in thread_names:
+                self.chat_listbox.insert(tk.END, name)
+            
+        except Exception as e:
+            self.logger.error(f"Error populating chat list: {e}", exc_info=True)
 
     def _setup_styles(self) -> None:
         """Configure ttk styles for the application."""
@@ -178,17 +200,22 @@ class MessagingApp:
 
     def _initialize_async(self) -> None:
         """Initialize the application asynchronously."""
-        self.event_bus.publish(Event(
-            EventType.STATE_CHANGED,
-            {"state": ConnectionState.CONNECTING}
-        ))
-        self.async_app.run_async(self.controller.initialize())
+        def init_app():
+            try:
+                # Run the initialization coroutine
+                asyncio.run(self.controller.initialize())
+            except Exception as e:
+                self.logger.error(f"Initialization error: {e}", exc_info=True)
 
+        # Run initialization in a separate thread
+        threading.Thread(target=init_app, daemon=True).start()
+        
     def _on_thread_selected(self, event) -> None:
         """Handle thread selection from listbox."""
         selection = self.chat_listbox.curselection()
         if selection:
             thread_name = self.chat_listbox.get(selection[0])
+            self.logger.info(f"Selected thread: {thread_name}")
             self.event_bus.publish(Event(
                 EventType.THREAD_SELECTED,
                 {"thread_name": thread_name}
@@ -286,7 +313,19 @@ class MessagingApp:
 
     def _on_ui_refresh(self, event: Event) -> None:
         """Handle UI refresh requests."""
-        self.message_display_widget.update_idletasks()
+        try:
+            action = event.data.get("action")
+            
+            if action == "update_thread":
+                # Get and run the update function
+                update_func = event.data.get("update_func")
+                if update_func:
+                    update_func()
+            else:
+                # Existing refresh logic
+                self.message_display_widget.update_idletasks()
+        except Exception as e:
+            self.logger.error(f"Error in UI refresh: {e}", exc_info=True)
 
     def _on_close(self) -> None:
         """Handle application window close."""

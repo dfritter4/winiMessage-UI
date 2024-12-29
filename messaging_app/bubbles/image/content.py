@@ -1,4 +1,6 @@
+import os
 import tkinter as tk
+from urllib.parse import unquote
 from PIL import Image, ImageTk
 from typing import Optional, Dict, Any
 import io
@@ -9,8 +11,9 @@ from ..resources import image_cache
 class ImageContent(IBubbleContent):
     """Handles the content creation for image messages."""
     
-    def __init__(self, image_url: str, text: Optional[str] = None):
-        self.image_url = image_url
+    def __init__(self, image_url: Optional[str] = None, text: Optional[str] = None):
+        # Prefer attachment_url if provided
+        self.image_url = image_url or ""
         self.text = text
         self._photo_image: Optional[ImageTk.PhotoImage] = None
         
@@ -92,22 +95,62 @@ class ImageContent(IBubbleContent):
     def _load_image(self) -> Optional[Image.Image]:
         """Load and process the image data."""
         try:
-            if self.image_url in image_cache:
-                return Image.open(io.BytesIO(image_cache[f"{self.image_url}_original"]))
+            # Prioritize attachment_url if available
+            image_url = self.image_url
             
-            response = requests.get(self.image_url, timeout=5)
-            response.raise_for_status()
+            # Use attachment URL if it's a proper HTTP/HTTPS URL
+            if image_url.startswith(('http://', 'https://')):
+                # Check cache first
+                if image_url in image_cache:
+                    return Image.open(io.BytesIO(image_cache[f"{image_url}_original"]))
+                
+                # Fetch from server
+                response = requests.get(image_url, timeout=5)
+                response.raise_for_status()
+                
+                # Try different image libraries for HEIC support
+                try:
+                    # First, try Pillow
+                    image_data = Image.open(io.BytesIO(response.content))
+                except Exception as pillow_error:
+                    try:
+                        # If Pillow fails, try pyheif for HEIC support
+                        import pyheif
+                        heif_file = pyheif.read(response.content)
+                        image_data = Image.frombytes(
+                            heif_file.mode, 
+                            heif_file.size, 
+                            heif_file.data,
+                            "raw",
+                            heif_file.mode,
+                            heif_file.stride,
+                        )
+                    except ImportError:
+                        print("pyheif not installed. HEIC support limited.")
+                        raise pillow_error
+                
+                # Cache original image data
+                image_cache[f"{image_url}_original"] = response.content
+                
+                return image_data
             
-            # Process image data
-            image_data = Image.open(io.BytesIO(response.content))
+            # Fallback to local file handling (previous implementation)
+            if image_url.startswith('file://'):
+                file_path = unquote(image_url[7:])
+                if file_path.startswith('~'):
+                    file_path = os.path.expanduser(file_path)
+                return Image.open(file_path)
             
-            # Cache original image data
-            image_cache[f"{self.image_url}_original"] = response.content
+            # Local path handling as a last resort
+            if os.path.exists(image_url):
+                return Image.open(image_url)
             
-            return image_data
-            
+            # If no valid image source is found
+            print(f"No valid image source found for URL: {image_url}")
+            return None
+                
         except Exception as e:
-            print(f"Error loading image: {e}")
+            print(f"Error loading image from {self.image_url}: {e}")
             return None
     
     def _show_image_preview(self, canvas: tk.Canvas) -> None:

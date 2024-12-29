@@ -3,3 +3,5 @@ pillow
 requests
 typing
 dataclasses
+python-dateutil
+pyheif

@@ -161,25 +161,54 @@ class ChatController:
         try:
             thread_name = event.data.get("thread_name")
             if not thread_name:
+                self.logger.warning("No thread name provided")
                 return
 
-            thread = await self.thread_manager.get_thread_by_name(thread_name)
-            if thread:
-                self._current_thread = thread
-                self.message_display.clear_display()
+            # Use a timeout to prevent indefinite waiting
+            thread = await asyncio.wait_for(
+                self.thread_manager.get_thread_by_name(thread_name), 
+                timeout=5.0
+            )
+
+            if not thread:
+                self.logger.warning(f"No thread found with name: {thread_name}")
+                return
+
+            # Update current thread and display messages
+            self._current_thread = thread
+            
+            # Clear display on main thread
+            def update_ui():
+                try:
+                    self.message_display.clear_display()
+                    
+                    # Display thread messages
+                    for message in sorted(thread.messages, key=lambda m: m.timestamp):
+                        self.message_display.display_message(message)
+                    
+                    self.message_display.scroll_to_bottom()
+                    self.message_display.set_current_thread(thread.guid)
+                    
+                    # Update state
+                    self._update_current_thread(thread.guid)
+                except Exception as e:
+                    self.logger.error(f"Error updating UI: {e}", exc_info=True)
+            
+            # Schedule UI update on main thread
+            self.event_bus.publish(Event(
+                EventType.UI_REFRESH_REQUESTED,
+                {"action": "update_thread", "thread_name": thread_name, "update_func": update_ui}
+            ))
                 
-                # Display thread messages
-                for message in sorted(thread.messages, key=lambda m: m.timestamp):
-                    self.message_display.display_message(message)
-                
-                self.message_display.scroll_to_bottom()
-                self.message_display.set_current_thread(thread.guid)
-                
-                # Update state
-                self._update_current_thread(thread.guid)
-                
+        except asyncio.TimeoutError:
+            self.logger.error(f"Timeout getting thread: {thread_name}")
         except Exception as e:
-            self.error_handler.handle_error(e, "thread_selection")
+            self.logger.error(f"Error in thread selection: {e}", exc_info=True)
+            # Publish error event
+            self.event_bus.publish(Event(
+                EventType.ERROR_OCCURRED,
+                {"error": str(e), "context": "thread_selection"}
+            ))
 
     async def _handle_new_chat(self, event: Event) -> None:
         """Handle new chat creation requests."""
@@ -218,6 +247,10 @@ class ChatController:
         try:
             thread_guid = event.data.get("thread_guid")
             message = event.data.get("message")
+
+            self.logger.info(f"Received message event:")
+            self.logger.info(f"- Thread GUID: {thread_guid}")
+            self.logger.info(f"- Message: {message}")
             
             if not thread_guid or not message:
                 return
