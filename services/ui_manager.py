@@ -1,140 +1,202 @@
 import tkinter as tk
+from tkinter import messagebox, simpledialog
 import logging
-from typing import Optional, Dict
-from ..domain import IMessageDisplay, Message, IEventBus, Event, EventType
-from ..config import AppConfig
-from ..bubbles import TextBubble, ImageBubble, EnhancedTextBubble
-from ..modern_ui import ModernScrolledText
+from typing import Optional, Callable, Dict
 
-class MessageDisplayManager(IMessageDisplay):
+from ..domain import IEventBus, Event, EventType, AppState, IStateManager
+from ..config import AppConfig
+from ..modern_ui import (
+    ModernScrolledText,
+    ModernListbox,
+    ModernEntry,
+    ModernButton,
+    ModernFrame
+)
+
+class UIManager:
     def __init__(
         self,
-        container: ModernScrolledText,
+        root: tk.Tk,
         config: AppConfig,
-        event_bus: IEventBus
+        event_bus: IEventBus,
+        state_manager: IStateManager
     ):
-        self.container = container
+        self.root = root
         self.config = config
         self.event_bus = event_bus
+        self.state_manager = state_manager
         self.logger = logging.getLogger(__name__)
-        self._current_thread_guid: Optional[str] = None
-        self._message_widgets: Dict[str, tk.Widget] = {}
 
-    def display_message(self, message: Message) -> None:
-        """Display a single message in the UI."""
+        # Initialize UI components as None
+        self.main_container: Optional[ModernFrame] = None
+        self.paned_window: Optional[tk.PanedWindow] = None
+        self.sidebar: Optional[ModernFrame] = None
+        self.chat_listbox: Optional[ModernListbox] = None
+        self.message_display: Optional[ModernScrolledText] = None
+        self.message_entry: Optional[tk.Text] = None
+        self.send_button: Optional[ModernButton] = None
+
+        # Set up UI
+        self._setup_root()
+        self._create_ui()
+        self._setup_event_handlers()
+
+    def _setup_root(self) -> None:
+        """Configure the root window."""
+        self.root.title("Messages")
+        self.root.geometry("1000x700")
+        self.root.configure(bg=self.config.colors.background)
+
+    def _create_ui(self) -> None:
+        """Create the main UI components."""
         try:
-            # Create container frame for the message
-            container = tk.Frame(
-                self.container.scrollable_frame,
-                bg=self.config.colors.background
+            # Main container
+            self.main_container = ModernFrame(self.root)
+            self.main_container.pack(fill="both", expand=True)
+
+            # PanedWindow
+            self.paned_window = tk.PanedWindow(
+                self.main_container,
+                orient=tk.HORIZONTAL,
+                sashrelief="raised"
             )
-            container.pack(
-                fill="x",
-                padx=15,
-                pady=5
-            )
+            self.paned_window.pack(fill="both", expand=True)
 
-            # Determine if this is an image message
-            is_image = (
-                message.attachment_url is not None and
-                any(message.attachment_url.lower().endswith(ext)
-                    for ext in ['.jpg', '.jpeg', '.png', '.gif', '.heic', '.heif'])
-            )
-
-            # Create appropriate bubble type
-            if is_image:
-                bubble = ImageBubble(
-                    container,
-                    message.text,
-                    message.attachment_url,
-                    is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=message.sender_name
-                )
-            else:
-                bubble = EnhancedTextBubble(
-                    container,
-                    message.text,
-                    is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=message.sender_name
-                )
-
-            bubble.pack(
-                side="right" if message.direction == "outgoing" else "left",
-                fill="none",
-                expand=False
-            )
-
-            # Store widget reference
-            message_id = f"{message.sender_name}:{message.timestamp}"
-            self._message_widgets[message_id] = container
-
-            # Update container
-            self.container.scrollable_frame.update_idletasks()
-            self.container._on_frame_configure()
-
-            # Publish message displayed event
-            self.event_bus.publish(Event(
-                EventType.MESSAGE_DISPLAYED,
-                {"message_id": message_id}
-            ))
+            self._create_sidebar()
+            self._create_chat_area()
 
         except Exception as e:
-            self.logger.error(f"Error displaying message: {e}", exc_info=True)
+            self.logger.error(f"Error creating UI: {e}", exc_info=True)
             self.event_bus.publish(Event(
                 EventType.ERROR_OCCURRED,
-                {"error": str(e), "context": "message_display"}
+                {"error": str(e), "context": "ui_creation"}
             ))
 
-    def clear_display(self) -> None:
-        """Clear all messages from the display."""
-        try:
-            # Remove all widgets
-            for widget in self._message_widgets.values():
-                widget.destroy()
-            self._message_widgets.clear()
+    def _create_sidebar(self) -> None:
+        """Create the sidebar components."""
+        self.sidebar = ModernFrame(
+            self.paned_window,
+            style="Sidebar.TFrame",
+            width=250
+        )
+        self.paned_window.add(self.sidebar, minsize=200)
 
-            # Reset scroll region
-            self.container._on_frame_configure()
+        # Search Entry
+        self.search_entry = ModernEntry(
+            self.sidebar,
+            placeholder="Search Messages",
+            font=(self.config.ui.font_family, self.config.ui.font_sizes["normal"])
+        )
+        self.search_entry.pack(fill="x", padx=10, pady=10)
 
-        except Exception as e:
-            self.logger.error(f"Error clearing display: {e}", exc_info=True)
+        # Chat Listbox
+        self.chat_listbox = ModernListbox(self.sidebar, height=20)
+        self.chat_listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # New Chat Button
+        self.new_chat_btn = ModernButton(
+            self.sidebar,
+            text="New Message",
+            command=self._on_new_chat_clicked
+        )
+        self.new_chat_btn.pack(fill="x", padx=10, pady=(0, 10))
+
+    def _create_chat_area(self) -> None:
+        """Create the chat area components."""
+        chat_container = ModernFrame(self.paned_window)
+        self.paned_window.add(chat_container, minsize=400)
+
+        # Message Display
+        self.message_display = ModernScrolledText(chat_container)
+        self.message_display.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Input Area
+        input_frame = ModernFrame(chat_container)
+        input_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.message_entry = tk.Text(
+            input_frame,
+            height=3,
+            font=(self.config.ui.font_family, self.config.ui.font_sizes["normal"]),
+            wrap="word",
+            bd=1,
+            relief="solid"
+        )
+        self.message_entry.pack(fill="x", side="left", expand=True, padx=(0, 10))
+
+        self.send_button = ModernButton(
+            input_frame,
+            text="Send",
+            command=self._on_send_clicked
+        )
+        self.send_button.pack(side="right")
+
+    def _setup_event_handlers(self) -> None:
+        """Set up event handlers for UI components."""
+        self.chat_listbox.bind("<<ListboxSelect>>", self._on_chat_selected)
+        self.message_entry.bind("<Return>", self._on_return_key)
+        self.message_entry.bind("<Shift-Return>", lambda e: 'break')
+
+        # Subscribe to events
+        self.event_bus.subscribe(EventType.ERROR_OCCURRED, self._handle_error)
+        self.event_bus.subscribe(EventType.STATE_CHANGED, self._handle_state_change)
+
+    def _on_chat_selected(self, event) -> None:
+        """Handle chat selection from the listbox."""
+        selection = self.chat_listbox.curselection()
+        if selection:
+            selected_name = self.chat_listbox.get(selection[0])
             self.event_bus.publish(Event(
-                EventType.ERROR_OCCURRED,
-                {"error": str(e), "context": "clear_display"}
+                EventType.THREAD_SELECTED,
+                {"thread_name": selected_name}
             ))
 
-    def scroll_to_bottom(self) -> None:
-        """Scroll the display to the bottom."""
-        try:
-            self.container.scroll_to_bottom()
-        except Exception as e:
-            self.logger.error(f"Error scrolling to bottom: {e}", exc_info=True)
+    def _on_send_clicked(self) -> None:
+        """Handle send button click."""
+        message = self.message_entry.get("1.0", "end-1c").strip()
+        if message:
             self.event_bus.publish(Event(
-                EventType.ERROR_OCCURRED,
-                {"error": str(e), "context": "scroll_to_bottom"}
+                EventType.SEND_MESSAGE_REQUESTED,
+                {"message": message}
             ))
+            self.message_entry.delete("1.0", tk.END)
 
-    def set_current_thread(self, thread_guid: str) -> None:
-        """Set the current thread being displayed."""
-        self._current_thread_guid = thread_guid
+    def _on_return_key(self, event) -> None:
+        """Handle return key in message entry."""
+        if not event.state & 0x1:  # Shift key is not pressed
+            self._on_send_clicked()
+            return 'break'
+        return None
 
-    def remove_message(self, message_id: str) -> None:
-        """Remove a specific message from the display."""
-        try:
-            if message_id in self._message_widgets:
-                self._message_widgets[message_id].destroy()
-                del self._message_widgets[message_id]
-                self.container._on_frame_configure()
-        except Exception as e:
-            self.logger.error(f"Error removing message: {e}", exc_info=True)
-            self.event_bus.publish(Event(
-                EventType.ERROR_OCCURRED,
-                {"error": str(e), "context": "remove_message"}
-            ))
+    def _on_new_chat_clicked(self) -> None:
+        """Handle new chat button click."""
+        self.event_bus.publish(Event(
+            EventType.NEW_CHAT_REQUESTED,
+            {}
+        ))
 
-    def update_message_status(self, message_id: str, status: str) -> None:
-        """Update the status of a message (e.g., sent, delivered, read)."""
-        # This will be implemented when we add message status features
+    def _handle_error(self, event: Event) -> None:
+        """Handle error events."""
+        error_data = event.data
+        messagebox.showerror(
+            "Error",
+            error_data.get("error", "An unknown error occurred.")
+        )
+
+    def _handle_state_change(self, event: Event) -> None:
+        """Handle state change events."""
+        new_state: AppState = event.data["new_state"]
+        # Update UI based on new state
         pass
+
+    def show_error(self, message: str) -> None:
+        """Show an error message to the user."""
+        messagebox.showerror("Error", message)
+
+    def show_info(self, message: str) -> None:
+        """Show an info message to the user."""
+        messagebox.showinfo("Information", message)
+
+    def ask_input(self, prompt: str, title: str = "Input") -> Optional[str]:
+        """Ask the user for input."""
+        return simpledialog.askstring(title, prompt, parent=self.root)

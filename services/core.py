@@ -1,6 +1,6 @@
 from typing import Dict, List, Callable
-from domain.interfaces import IEventBus, IStateManager, Event
-from domain.models import AppState
+from ..domain.interfaces import IEventBus, IStateManager, Event
+from ..domain.models import AppState
 import threading
 import logging
 
