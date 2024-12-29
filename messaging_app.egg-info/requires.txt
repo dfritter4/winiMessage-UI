@@ -1,0 +1,7 @@
+aiohttp
+pillow
+requests
+typing
+dataclasses
+python-dateutil
+pillow-heif
