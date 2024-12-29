@@ -1,3 +1,5 @@
+aiohttp
 pillow
 requests
-vobject
+typing
+dataclasses
