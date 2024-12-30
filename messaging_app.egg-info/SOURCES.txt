@@ -1,3 +1,4 @@
+README
 setup.py
 messaging_app/__init__.py
 messaging_app/app.py
@@ -13,8 +14,6 @@ messaging_app/bubbles/__init__.py
 messaging_app/bubbles/base.py
 messaging_app/bubbles/interfaces.py
 messaging_app/bubbles/resources.py
-messaging_app/bubbles/text_handlers.py
-messaging_app/bubbles/text_parser.py
 messaging_app/bubbles/base/__init__.py
 messaging_app/bubbles/base/bubble.py
 messaging_app/bubbles/base/content.py
