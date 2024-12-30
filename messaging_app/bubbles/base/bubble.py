@@ -39,8 +39,9 @@ class BaseBubble(tk.Canvas):
         self.is_outgoing = is_outgoing
         self.timestamp = timestamp
         self.sender_name = sender_name
-        self.padding = 12
-        
+        self.padding = 14
+        self.corner_radius = 12  # Explicit corner radius
+
         # Configure background
         self.configure(bg=self.style.get_background_color(is_outgoing))
         

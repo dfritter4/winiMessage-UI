@@ -15,27 +15,30 @@ class DefaultBubbleDrawer(IBubbleDrawer):
             width: The width of the bubble
             height: The height of the bubble
             **kwargs: Additional drawing arguments including:
-                - radius: Corner radius (default: 15)
+                - radius: Corner radius (default: 12)
                 - fill: Fill color
                 - outline: Outline color
                 - tags: Canvas tags to apply
+                - is_outgoing: Whether this is an outgoing message
         """
-        radius = kwargs.get('radius', 15)
+        # Default to 12px radius for modern look
+        radius = kwargs.get('radius', 12)
         
-        # Ensure minimum size
-        if width < radius * 2:
-            radius = width / 2
-        if height < radius * 2:
-            radius = height / 2
+        # Ensure minimum size - extra safety check
+        if width < radius * 2.5:  # Added extra buffer
+            radius = int(width / 2.5)
+        if height < radius * 2.5:
+            radius = int(height / 2.5)
             
         # Create points for rounded corners
         points = self._create_rounded_rectangle_points(x, y, width, height, radius)
         
-        # Create the bubble shape
+        # Create the bubble shape with antialiasing
         canvas.create_polygon(
             points,
             smooth=True,
-            **{k: v for k, v in kwargs.items() if k not in ['radius']}
+            splinesteps=32,  # Increase smoothness
+            **{k: v for k, v in kwargs.items() if k not in ['radius', 'is_outgoing']}
         )
     
     def _create_rounded_rectangle_points(self, 
@@ -44,7 +47,7 @@ class DefaultBubbleDrawer(IBubbleDrawer):
                                       width: int, 
                                       height: int, 
                                       radius: int) -> List[int]:
-        """Create points for a rounded rectangle shape.
+        """Create points for a rounded rectangle shape with smoother corners.
         
         Args:
             x: Starting x coordinate
@@ -56,21 +59,32 @@ class DefaultBubbleDrawer(IBubbleDrawer):
         Returns:
             List[int]: List of x,y coordinates for the polygon
         """
+        import math
         x2 = x + width
         y2 = y + height
+        points = []
         
-        return [
-            x + radius, y,              # Top edge start
-            x2 - radius, y,             # Top edge end
-            x2, y,                      # Top-right corner start
-            x2, y + radius,             # Top-right corner end
-            x2, y2 - radius,            # Bottom-right corner start
-            x2, y2,                     # Bottom-right corner end
-            x2 - radius, y2,            # Bottom edge start
-            x + radius, y2,             # Bottom edge end
-            x, y2,                      # Bottom-left corner start
-            x, y2 - radius,             # Bottom-left corner end
-            x, y + radius,              # Top-left corner start
-            x, y,                       # Top-left corner end
-            x + radius, y               # Close the shape
-        ]
+        # Number of points to use for each corner
+        steps = 8
+        
+        # Helper function to add arc points
+        def add_corner_points(center_x, center_y, start_angle, end_angle):
+            for i in range(steps + 1):
+                theta = math.radians(start_angle + (i * (end_angle - start_angle) / steps))
+                px = center_x + radius * math.cos(theta)
+                py = center_y + radius * math.sin(theta)
+                points.extend([px, py])
+        
+        # Top left corner
+        add_corner_points(x + radius, y + radius, 180, 270)
+        
+        # Top right corner
+        add_corner_points(x2 - radius, y + radius, 270, 360)
+        
+        # Bottom right corner
+        add_corner_points(x2 - radius, y2 - radius, 0, 90)
+        
+        # Bottom left corner
+        add_corner_points(x + radius, y2 - radius, 90, 180)
+        
+        return points

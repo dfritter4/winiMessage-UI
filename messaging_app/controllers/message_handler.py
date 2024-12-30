@@ -48,12 +48,26 @@ class MessageHandler(IMessageHandler):
                     sender_name="Me",
                     timestamp=timestamp,
                     direction="outgoing",
-                    thread_name=self._current_thread.name if self._current_thread else None
+                    thread_name=self._current_thread.name if self._current_thread else None,
+                    guid=f"outgoing_{timestamp}"  # Add a unique guid for immediate display
                 )
 
+                # First update the UI immediately
+                if self._current_thread and self._current_thread.guid == thread_guid:
+                    self.message_display.display_message(message, thread_guid)
+                    self.message_display.scroll_to_bottom()
+
+                # Then update the thread data
                 await self.thread_manager.update_thread(thread_guid, [message])
-                self.message_display.display_message(message)
-                self.message_display.scroll_to_bottom()
+                
+                # Publish event for any other components that need to know
+                self.event_bus.publish(Event(
+                    EventType.MESSAGE_SENT,
+                    {
+                        "thread_guid": thread_guid,
+                        "message": message
+                    }
+                ))
                 return True
 
             return False
@@ -61,7 +75,7 @@ class MessageHandler(IMessageHandler):
         except Exception as e:
             self.error_handler.handle_error(e, "send_message")
             return False
-
+        
     async def handle_message_received(self, event: Event) -> None:
         try:
             thread_guid = event.data.get("thread_guid")

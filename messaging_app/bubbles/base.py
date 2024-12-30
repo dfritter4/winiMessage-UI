@@ -27,31 +27,39 @@ class DefaultBubbleStyle(IBubbleStyle):
 
 class DefaultBubbleDrawer(IBubbleDrawer):
     def draw_bubble(self, canvas: tk.Canvas, x: int, y: int, width: int, height: int, **kwargs) -> None:
-        is_outgoing = kwargs.get('is_outgoing', False)
-        style = kwargs.get('style')
-        if not style:
-            return
-            
-        color = style.get_background_color(is_outgoing)
-        radius = min(15, min(width, height) / 4)
+        """Draw the bubble shape on the canvas with properly rounded corners.
         
-        points = [
-            x + radius, y,
-            x + width - radius, y,
-            x + width, y,
-            x + width, y + radius,
-            x + width, y + height - radius,
-            x + width, y + height,
-            x + width - radius, y + height,
-            x + radius, y + height,
-            x, y + height,
-            x, y + height - radius,
-            x, y + radius,
-            x, y,
-            x + radius, y
-        ]
+        Args:
+            canvas: The canvas to draw on
+            x: The x coordinate to start drawing
+            y: The y coordinate to start drawing
+            width: The width of the bubble
+            height: The height of the bubble
+            **kwargs: Additional drawing arguments
+        """
+        radius = kwargs.get('radius', 12)
+        fill_color = kwargs.get('fill', '#E9E9EB')
+        outline = kwargs.get('outline', '')
         
-        canvas.create_polygon(points, smooth=True, fill=color)
+        # Right side
+        canvas.create_arc(width - 2*radius + x, y, width + x, 2*radius + y, 
+                         start=270, extent=90, fill=fill_color, outline=outline)  # Top-right corner
+        canvas.create_arc(width - 2*radius + x, height - 2*radius + y, width + x, height + y, 
+                         start=0, extent=90, fill=fill_color, outline=outline)    # Bottom-right corner
+        canvas.create_rectangle(width - radius + x, y, width + x, height + y,
+                              fill=fill_color, outline=outline)  # Right edge
+        
+        # Left side
+        canvas.create_arc(x, y, 2*radius + x, 2*radius + y,
+                         start=180, extent=90, fill=fill_color, outline=outline)  # Top-left corner
+        canvas.create_arc(x, height - 2*radius + y, 2*radius + x, height + y,
+                         start=90, extent=90, fill=fill_color, outline=outline)   # Bottom-left corner
+        canvas.create_rectangle(x, y, radius + x, height + y,
+                              fill=fill_color, outline=outline)  # Left edge
+        
+        # Center
+        canvas.create_rectangle(radius + x, y, width - radius + x, height + y,
+                              fill=fill_color, outline=outline)  # Center rectangle
 
 class BaseBubble(tk.Canvas):
     """Base class for message bubbles."""

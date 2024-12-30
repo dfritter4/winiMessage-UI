@@ -54,7 +54,7 @@ class ThreadHandler(IThreadHandler):
                     for message in messages:
                         self.message_display.display_message(message, thread.guid)
                     
-                    self.message_display.scroll_to_bottom()
+                    self.message_display.container.after(100, self.message_display.scroll_to_bottom)
                     
                 except Exception as e:
                     self.logger.error(f"Error updating UI: {e}", exc_info=True)
