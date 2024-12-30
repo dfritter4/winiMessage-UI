@@ -1,6 +1,6 @@
-# Messaging App
+# Windows iMessaging Client
 
-A Windows thin client for iMessage built with Python and Tkinter.
+A Windows thin client for iMessage built with Python and Tkinter. Requires a separate backend service that runs on a macOS device that's signed into your Apple ID.
 
 ## Features
 
