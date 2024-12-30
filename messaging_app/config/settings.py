@@ -31,7 +31,7 @@ class ColorConfig:
 
 @dataclass
 class NetworkConfig:
-    server_url: str = "http://192.168.1.203:5001"
+    server_url: str = "http://192.168.1.203:5001" # 0.0.0.0:5001
     poll_interval: int = 2
     request_timeout: int = 5
     max_retries: int = 3
