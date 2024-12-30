@@ -43,6 +43,10 @@ class ThreadHandler(IThreadHandler):
                 self.logger.warning(f"No thread found with name: {thread_name}")
                 return
 
+            # Skip reload if already on this thread
+            if self._current_thread and self._current_thread.guid == thread.guid:
+                return
+
             self._current_thread = thread
             
             def update_ui():
@@ -51,10 +55,7 @@ class ThreadHandler(IThreadHandler):
                     self.message_display.set_current_thread(thread.guid)
                     
                     messages = safe_timestamp_sort(thread.messages)
-                    for message in messages:
-                        self.message_display.display_message(message, thread.guid)
-                    
-                    self.message_display.container.after(100, self.message_display.scroll_to_bottom)
+                    self.message_display.display_thread_messages(messages, thread.guid)
                     
                 except Exception as e:
                     self.logger.error(f"Error updating UI: {e}", exc_info=True)

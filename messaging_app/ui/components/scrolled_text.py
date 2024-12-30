@@ -37,9 +37,9 @@ class ModernScrolledText(tk.Frame):
             widget.destroy()
 
     def scroll_to_bottom(self):
-        """Ensure reliable scrolling to bottom of content."""
+        """Ensure immediate scroll to bottom without animation."""
         try:
-            # Update geometry management
+            # Force complete geometry update
             self.update_idletasks()
             self.canvas.update_idletasks()
             self.scrollable_frame.update_idletasks()
@@ -47,15 +47,10 @@ class ModernScrolledText(tk.Frame):
             # Force geometry recalculation
             self._on_frame_configure()
             
-            # Schedule multiple scroll attempts to ensure it takes effect
-            def do_scroll():
-                self.canvas.yview_moveto(1.0)
-                # Schedule another scroll attempt after a short delay
-                self.after(50, lambda: self.canvas.yview_moveto(1.0))
+            # Set view directly to bottom
+            self.canvas.yview_moveto(1.0)
             
-            # Initial scroll attempt
-            self.after(10, do_scroll)
-            
-        except tk.TclError as e:
-            self.logger.debug(f"Error in scroll_to_bottom: {e}")
+            # Force immediate update
+            self.canvas.update_idletasks()
+        except tk.TclError:
             pass

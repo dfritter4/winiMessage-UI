@@ -2,7 +2,6 @@ import tkinter as tk
 import logging
 from typing import Optional, Dict, List, Set
 from messaging_app.bubbles.base import DefaultBubbleStyle
-from messaging_app.bubbles.text_handlers import EnhancedTextContent
 from messaging_app.domain import IMessageDisplay, Message, IEventBus, Event, EventType
 from messaging_app.config import AppConfig
 from messaging_app.bubbles import TextBubble, ImageBubble, EnhancedTextBubble
@@ -15,39 +14,48 @@ class MessageDisplayManager(IMessageDisplay):
         self.event_bus = event_bus
         self.logger = logging.getLogger(__name__)
         self._current_thread_guid: Optional[str] = None
-        self._displayed_guids: Set[str] = set()  # Track displayed message GUIDs
+        self._displayed_guids: Set[str] = set()
         self._message_widgets: Dict[str, Dict[str, tk.Widget]] = {}
 
-    def display_message(self, message: Message, thread_guid: Optional[str] = None) -> None:
-        """Display a message in the current thread's chat window with guid-based deduplication."""
-        if thread_guid is None:
-            thread_guid = self._current_thread_guid
-            
-        if thread_guid != self._current_thread_guid:
-            self.logger.debug(f"Skipping display of message for non-active thread {thread_guid}")
-            return
-
-        if not message.guid:
-            self.logger.warning("Message has no GUID, skipping display")
-            return
-            
-        if message.guid in self._displayed_guids:
-            self.logger.debug(f"Skipping duplicate message: {message.guid}")
-            return
-
-        if not message.text and not message.attachments:
-            self.logger.debug(f"Skipping empty message with no text or attachments")
-            return
-
+    def display_thread_messages(self, messages, thread_guid: str) -> None:
+        """Efficiently display all thread messages at once."""
         try:
-            # Create a container for the message bubble
-            container = tk.Frame(
+            if thread_guid != self._current_thread_guid:
+                return
+                
+            thread_container = tk.Frame(
                 self.container.scrollable_frame,
+                bg=self.config.colors.background
+            )
+            thread_container.pack(fill="x", expand=True)
+            
+            for message in messages:
+                if not message.guid or message.guid in self._displayed_guids:
+                    continue
+                    
+                message_frame = self._create_message_frame(message, thread_container)
+                if message_frame:
+                    if thread_guid not in self._message_widgets:
+                        self._message_widgets[thread_guid] = {}
+                    self._message_widgets[thread_guid][message.guid] = message_frame
+                    self._displayed_guids.add(message.guid)
+            
+            self.container.update_idletasks()
+            self.container._on_frame_configure()
+            self.container.scroll_to_bottom()
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying thread messages: {e}", exc_info=True)
+
+    def _create_message_frame(self, message, parent_container):
+        """Create a message frame with all its content."""
+        try:
+            container = tk.Frame(
+                parent_container,
                 bg=self.config.colors.background
             )
             container.pack(fill="x", padx=15, pady=5)
 
-            # Create a container for all message content
             message_content = tk.Frame(container, bg=self.config.colors.background)
             message_content.pack(
                 side="right" if message.direction == "outgoing" else "left",
@@ -57,74 +65,66 @@ class MessageDisplayManager(IMessageDisplay):
 
             style = DefaultBubbleStyle(self.config)
 
-            # Process each attachment vertically
-            for attachment in message.attachments:
-                is_image = attachment.mime_type.startswith('image/')
+            if message.attachments:
+                self._add_attachments(message, message_content, style)
                 
-                if is_image:
-                    bubble = ImageBubble(
-                        message_content,
-                        content=message.text if len(message.attachments) == 1 else "",
-                        image_url=attachment.url,
-                        style=style,
-                        is_outgoing=message.direction == "outgoing",
-                        timestamp=message.timestamp if attachment == message.attachments[-1] else None,
-                        sender_name=message.sender_name if attachment == message.attachments[0] else None,
-                    )
-                    bubble.pack(
-                        fill="none",
-                        expand=False,
-                        pady=(0, 5)
-                    )
-                    self.logger.info(f"Created ImageBubble with URL: {attachment.url}")
+            if message.text and (not message.attachments or len(message.attachments) > 1):
+                self._add_text_bubble(message, message_content, style)
 
-            # If there's text and multiple attachments, show it in a separate bubble
-            if message.text and len(message.attachments) > 1:
-                bubble = EnhancedTextBubble(
+            return container
+        except Exception as e:
+            self.logger.error(f"Error creating message frame: {e}", exc_info=True)
+            return None
+
+    def _add_attachments(self, message, message_content, style):
+        """Add attachment bubbles to the message content."""
+        for attachment in message.attachments:
+            if attachment.mime_type.startswith('image/'):
+                bubble = ImageBubble(
                     message_content,
-                    content=message.text,
+                    content=message.text if len(message.attachments) == 1 else "",
+                    image_url=attachment.url,
                     style=style,
                     is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=None,
+                    timestamp=message.timestamp if attachment == message.attachments[-1] else None,
+                    sender_name=message.sender_name if attachment == message.attachments[0] else None,
                 )
-                bubble.pack(
-                    fill="none",
-                    expand=False,
-                )
+                bubble.pack(fill="none", expand=False, pady=(0, 5))
 
-            # If there's text but no attachments, create a text bubble
-            if not message.attachments and message.text:
-                bubble = EnhancedTextBubble(
-                    message_content,
-                    content=message.text,
-                    style=style,
-                    is_outgoing=message.direction == "outgoing",
-                    timestamp=message.timestamp,
-                    sender_name=message.sender_name,
-                )
-                bubble.pack(
-                    fill="none",
-                    expand=False,
-                )
+    def _add_text_bubble(self, message, message_content, style):
+        """Add a text bubble to the message content."""
+        bubble = EnhancedTextBubble(
+            message_content,
+            content=message.text,
+            style=style,
+            is_outgoing=message.direction == "outgoing",
+            timestamp=message.timestamp,
+            sender_name=message.sender_name,
+        )
+        bubble.pack(fill="none", expand=False)
 
-            # Store the widget reference
-            if thread_guid not in self._message_widgets:
-                self._message_widgets[thread_guid] = {}
-            self._message_widgets[thread_guid][message.guid] = container
-            self._displayed_guids.add(message.guid)
+    def display_message(self, message: Message, thread_guid: Optional[str] = None) -> None:
+        """Display a single message in the current thread."""
+        if thread_guid is None:
+            thread_guid = self._current_thread_guid
+            
+        if thread_guid != self._current_thread_guid:
+            return
 
-            # Force immediate updates
-            container.update()
-            message_content.update()
-            self.container.scrollable_frame.update()
-            self.container.update_idletasks()
-            self.scroll_to_bottom()
-            # Force immediate update
-            container.update_idletasks()
-            message_content.update_idletasks()
-            self.container.scrollable_frame.update_idletasks()
-            self.scroll_to_bottom()
+        if not message.guid or message.guid in self._displayed_guids or (not message.text and not message.attachments):
+            return
+
+        try:
+            message_frame = self._create_message_frame(message, self.container.scrollable_frame)
+            if message_frame:
+                if thread_guid not in self._message_widgets:
+                    self._message_widgets[thread_guid] = {}
+                self._message_widgets[thread_guid][message.guid] = message_frame
+                self._displayed_guids.add(message.guid)
+
+                message_frame.update_idletasks()
+                self.container._on_frame_configure()
+                self.scroll_to_bottom()
             
         except Exception as e:
             self.logger.error(f"Error displaying message: {e}", exc_info=True)
@@ -150,18 +150,15 @@ class MessageDisplayManager(IMessageDisplay):
             ))
 
     def set_current_thread(self, thread_guid: str) -> None:
-        """Set the current thread being displayed."""
+        """Set the current thread and position view at bottom."""
         if thread_guid != self._current_thread_guid:
-            self.logger.info(f"Switching to thread {thread_guid}")
             self.clear_display()
             self._current_thread_guid = thread_guid
+            self.container.canvas.yview_moveto(1.0)
+            self.container.update_idletasks()
             
-            # Initialize message widgets dict for this thread if needed
             if thread_guid not in self._message_widgets:
                 self._message_widgets[thread_guid] = {}
-            
-            # Ensure proper scrolling after thread switch
-            self.scroll_to_bottom()
 
     def remove_message(self, message_id: str, thread_guid: Optional[str] = None) -> None:
         """Remove a specific message from the display."""
