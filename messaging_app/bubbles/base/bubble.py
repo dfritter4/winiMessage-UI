@@ -47,7 +47,14 @@ class BaseBubble(tk.Canvas):
         
         # Create the bubble
         self._create_bubble()
+
+        self.bind("<Button-1>", self._handle_click)
     
+    def _handle_click(self, event):
+        # Delegate click to content handler
+        if hasattr(self.content, 'handle_click'):
+            self.content.handle_click(event.x, event.y)
+
     def _create_bubble(self) -> None:
         """Create the complete bubble with all components."""
         # Clear the canvas
