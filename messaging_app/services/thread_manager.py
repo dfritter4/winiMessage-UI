@@ -52,6 +52,16 @@ class ThreadManager(IThreadManager):
                 for guid, thread in threads.items()
             }
             
+            # Populate chat list
+            # If you have a method to update the chat list, call it here
+            self._event_bus.publish(Event(
+                EventType.THREAD_INITIALIZED,
+                {
+                    "threads": list(threads.keys()),
+                    "thread_names": list(self._thread_names.values())
+                }
+            ))
+            
             # Update application state
             current_state = self._state_manager.get_state()
             self._state_manager.update_state(AppState(
@@ -92,9 +102,13 @@ class ThreadManager(IThreadManager):
     async def get_thread_by_name(self, name: str) -> Optional[Thread]:
         """Get a thread by its name."""
         try:
+            # Find thread with matching name
             for thread in self._threads.values():
                 if thread.name == name:
                     return thread
+            
+            # If not found, log and return None
+            self._logger.warning(f"No thread found with name: {name}")
             return None
         except Exception as e:
             self._logger.error(f"Error getting thread by name {name}: {e}", exc_info=True)
@@ -155,6 +169,14 @@ class ThreadManager(IThreadManager):
     async def update_thread(self, guid: str, messages: List[Message]) -> None:
         """Update a thread with new messages."""
         try:
+            if not guid:
+                self._logger.warning("Received empty thread GUID")
+                return
+                
+            if not messages:
+                self._logger.debug(f"No messages to update for thread {guid}")
+                return
+            
             self._logger.debug(f"Updating thread {guid} with {len(messages)} messages")
             
             # Create thread if it doesn't exist
@@ -169,7 +191,8 @@ class ThreadManager(IThreadManager):
             
             # Add new messages
             for message in messages:
-                thread.add_message(message)
+                if message is not None:  # Explicit None check
+                    thread.add_message(message)
             
             # Update application state
             current_state = self._state_manager.get_state()
@@ -199,7 +222,6 @@ class ThreadManager(IThreadManager):
                     "context": "thread_update"
                 }
             ))
-            raise
 
     async def delete_thread(self, guid: str) -> None:
         """Delete a thread."""

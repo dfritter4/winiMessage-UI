@@ -1,23 +1,42 @@
 # services/core.py
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import logging
-from typing import Dict, List, Callable
+from typing import Any, Dict, List, Callable, Union
 from messaging_app.domain.interfaces import IEventBus, IStateManager
 from messaging_app.domain.models import Event, AppState, EventType
 
 class EventBus(IEventBus):
-    """
-    Event bus implementation for handling application-wide events.
-    Thread-safe implementation using locks for subscriber management.
-    """
+    """Thread-safe event bus implementation with async support."""
     
     def __init__(self):
-        self._subscribers: Dict[EventType, List[Callable[[Event], None]]] = {}
+        self._subscribers: Dict[EventType, List[Callable[[Event], Any]]] = {}
         self._lock = threading.Lock()
         self._logger = logging.getLogger(__name__)
-    
-    def subscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=5)
+        
+        # Ensure we have an event loop
+        try:
+            self._event_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._event_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._event_loop)
+
+    def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
+        """Ensure there's a running event loop for the current thread."""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                return asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return loop
+
+    def subscribe(self, event_type: EventType, callback: Callable[[Event], Any]) -> None:
         """Subscribe to a specific event type."""
         with self._lock:
             if event_type not in self._subscribers:
@@ -25,7 +44,7 @@ class EventBus(IEventBus):
             self._subscribers[event_type].append(callback)
             self._logger.debug(f"Added subscriber for {event_type}")
     
-    def unsubscribe(self, event_type: EventType, callback: Callable[[Event], None]) -> None:
+    def unsubscribe(self, event_type: EventType, callback: Callable[[Event], Any]) -> None:
         """Unsubscribe from a specific event type."""
         with self._lock:
             if event_type in self._subscribers:
@@ -33,21 +52,45 @@ class EventBus(IEventBus):
                     self._subscribers[event_type].remove(callback)
                     self._logger.debug(f"Removed subscriber for {event_type}")
                 except ValueError:
-                    pass  # Callback wasn't registered
-    
+                    pass
+
     def publish(self, event: Event) -> None:
         """Publish an event to all subscribers."""
         subscribers = []
         with self._lock:
             if event.type in self._subscribers:
                 subscribers = self._subscribers[event.type].copy()
-        
+
         for callback in subscribers:
             try:
-                callback(event)
+                if asyncio.iscoroutinefunction(callback):
+                    # Handle async callbacks
+                    loop = self._ensure_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self._run_async_callback(callback, event))
+                    else:
+                        self._executor.submit(self._run_async_in_new_loop, callback, event)
+                else:
+                    # Handle synchronous callbacks
+                    callback(event)
             except Exception as e:
                 self._logger.error(f"Error in event handler: {e}", exc_info=True)
-                # Continue processing other subscribers even if one fails
+
+    async def _run_async_callback(self, callback: Callable, event: Event) -> None:
+        """Run an async callback safely."""
+        try:
+            await callback(event)
+        except Exception as e:
+            self._logger.error(f"Error in async callback: {e}", exc_info=True)
+
+    def _run_async_in_new_loop(self, callback: Callable, event: Event) -> None:
+        """Run an async callback in a new event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run_async_callback(callback, event))
+        finally:
+            loop.close()
 
 class StateManager(IStateManager):
     """

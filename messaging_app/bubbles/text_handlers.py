@@ -98,9 +98,10 @@ class BasicTextContent(IBubbleContent):
 class EnhancedTextContent(IBubbleContent):
     """Handles text content with clickable links."""
     
-    def __init__(self, text: str):
-        self.text = text
-        self.parser = TextParser()
+    def __init__(self, text: str, parser: Optional[TextParser] = None):
+        # Ensure text is a string
+        self.text = str(text).strip() if text is not None else ""
+        self.parser = parser or TextParser()
         self._link_regions = []
         
     def create_content(self, canvas: tk.Canvas, x: int, y: int, width: int, **kwargs) -> Tuple[int, int]:

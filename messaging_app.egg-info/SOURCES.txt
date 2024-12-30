@@ -1,5 +1,8 @@
 setup.py
 messaging_app/__init__.py
+messaging_app/app.py
+messaging_app/app_lifecycle.py
+messaging_app/event_handling.py
 messaging_app/main.py
 messaging_app.egg-info/PKG-INFO
 messaging_app.egg-info/SOURCES.txt
@@ -10,7 +13,6 @@ messaging_app/bubbles/__init__.py
 messaging_app/bubbles/base.py
 messaging_app/bubbles/interfaces.py
 messaging_app/bubbles/resources.py
-messaging_app/bubbles/text_bubble.py
 messaging_app/bubbles/text_handlers.py
 messaging_app/bubbles/text_parser.py
 messaging_app/bubbles/base/__init__.py
@@ -24,6 +26,7 @@ messaging_app/bubbles/enhanced/content.py
 messaging_app/bubbles/enhanced/factory.py
 messaging_app/bubbles/image/__init__.py
 messaging_app/bubbles/image/bubble.py
+messaging_app/bubbles/image/cache.py
 messaging_app/bubbles/image/content.py
 messaging_app/bubbles/image/factory.py
 messaging_app/bubbles/text/__init__.py
@@ -34,6 +37,11 @@ messaging_app/config/__init__.py
 messaging_app/config/settings.py
 messaging_app/controllers/__init__.py
 messaging_app/controllers/chat_controller.py
+messaging_app/controllers/interfaces.py
+messaging_app/controllers/message_handler.py
+messaging_app/controllers/state_handler.py
+messaging_app/controllers/thread_handler.py
+messaging_app/controllers/ui_handler.py
 messaging_app/domain/__init__.py
 messaging_app/domain/event_types.py
 messaging_app/domain/interfaces.py
@@ -46,6 +54,8 @@ messaging_app/services/message_service.py
 messaging_app/services/thread_manager.py
 messaging_app/services/ui_manager.py
 messaging_app/ui/__init__.py
+messaging_app/ui/app.py
+messaging_app/ui/app_ui.py
 messaging_app/ui/components/__init__.py
 messaging_app/ui/components/button.py
 messaging_app/ui/components/entry.py
@@ -55,3 +65,4 @@ messaging_app/ui/components/scrolled_text.py
 messaging_app/utils/__init__.py
 messaging_app/utils/async_utils.py
 messaging_app/utils/logging_config.py
+messaging_app/utils/timestamp_utils.py

@@ -60,14 +60,6 @@ class IErrorHandler(ABC):
     def handle_error(self, error: Exception, context: str = None) -> None:
         pass
 
-class EventType:
-    MESSAGE_RECEIVED = "message_received"
-    MESSAGE_SENT = "message_sent"
-    THREAD_UPDATED = "thread_updated"
-    ERROR_OCCURRED = "error_occurred"
-    STATE_CHANGED = "state_changed"
-    CONNECTION_CHANGED = "connection_changed"
-
 class Event:
     def __init__(self, event_type: str, data: Any):
         self.type = event_type

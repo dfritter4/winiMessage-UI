@@ -5,6 +5,8 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from enum import Enum, auto
 
+from messaging_app.domain.event_types import EventType
+
 class ConnectionState(Enum):
     """Represents the possible connection states of the application."""
     DISCONNECTED = "disconnected"
@@ -12,40 +14,11 @@ class ConnectionState(Enum):
     CONNECTED = "connected"
     ERROR = "error"
 
-class EventType(Enum):
-    """Defines all possible event types in the application."""
-    
-    # Message Events
-    MESSAGE_RECEIVED = auto()
-    MESSAGE_SENT = auto()
-    MESSAGE_DELETED = auto()
-    MESSAGE_EDITED = auto()
-    MESSAGE_SEARCH_REQUESTED = auto()
-    SEND_MESSAGE_REQUESTED = auto()
-    MESSAGE_DISPLAYED = auto()
-    
-    # Thread Events
-    THREAD_SELECTED = auto()
-    THREAD_UPDATED = auto()
-    NEW_CHAT_REQUESTED = auto()
-    THREAD_DELETED = auto()
-    
-    # Connection Events
-    CONNECTION_CHANGED = auto()
-    CONNECTION_ERROR = auto()
-    
-    # State Events
-    STATE_CHANGED = auto()
-    ERROR_OCCURRED = auto()
-    
-    # UI Events
-    UI_REFRESH_REQUESTED = auto()
-    SCROLL_TO_BOTTOM = auto()
-    DISPLAY_ERROR = auto()
-    
-    # System Events
-    INITIALIZATION_COMPLETE = auto()
-    SHUTDOWN_REQUESTED = auto()
+@dataclass
+class Attachment:
+    """Represents a message attachment."""
+    url: str
+    mime_type: str
 
 @dataclass
 class Message:
@@ -55,14 +28,18 @@ class Message:
     timestamp: float
     thread_name: Optional[str] = None
     direction: str = "incoming"  # "incoming" or "outgoing"
-    attachment_path: Optional[str] = None
-    attachment_url: Optional[str] = None
+    attachments: List[Attachment] = None
     message_id: Optional[str] = None
+    guid: Optional[str] = None
 
+    def __post_init__(self):
+        if self.attachments is None:
+            self.attachments = []
     @property
     def formatted_timestamp(self) -> str:
         """Returns a formatted string representation of the timestamp."""
         return datetime.fromtimestamp(self.timestamp).strftime("%I:%M %p")
+
 
 @dataclass
 class Thread:

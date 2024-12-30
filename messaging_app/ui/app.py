@@ -1,4 +1,4 @@
-from .app_ui import MessageAppUI
+# ui/__init__.py
 from .components import (
     ModernButton,
     ModernEntry,
@@ -8,7 +8,6 @@ from .components import (
 )
 
 __all__ = [
-    'MessageAppUI',
     'ModernButton',
     'ModernEntry',
     'ModernFrame',

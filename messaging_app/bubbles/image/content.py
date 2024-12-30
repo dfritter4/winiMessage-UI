@@ -1,10 +1,11 @@
 import tkinter as tk
 from PIL import Image, ImageTk
-from typing import Optional, Dict, Any
+from typing import Optional
 import io
 import requests
+import logging
 from ..interfaces import IBubbleContent
-from ..resources import image_cache
+from .cache import ImageCache
 
 class ImageContent(IBubbleContent):
     """Handles the content creation for image messages."""
@@ -13,6 +14,8 @@ class ImageContent(IBubbleContent):
         self.image_url = image_url
         self.text = text
         self._photo_image: Optional[ImageTk.PhotoImage] = None
+        self.logger = logging.getLogger(__name__)
+        self._cache = ImageCache()  # Use the proper ImageCache class
         
     def create_content(self, canvas: tk.Canvas, x: int, y: int, width: int, **kwargs) -> tuple[int, int]:
         """Create the image content and optional text caption."""
@@ -39,6 +42,7 @@ class ImageContent(IBubbleContent):
         
         # Load and display image
         try:
+            self.logger.info(f"Loading image from URL: {self.image_url}")
             image_data = self._load_image()
             if image_data:
                 # Calculate image dimensions
@@ -51,7 +55,7 @@ class ImageContent(IBubbleContent):
                     new_width = int(new_height * image_ratio)
                 
                 # Resize image
-                image_data = image_data.resize((new_width, new_height), Image.LANCZOS)
+                image_data = image_data.resize((new_width, new_height), Image.Resampling.LANCZOS)
                 self._photo_image = ImageTk.PhotoImage(image_data)
                 
                 # Create image on canvas
@@ -72,7 +76,7 @@ class ImageContent(IBubbleContent):
                               lambda e: self._show_image_preview(canvas))
                 
         except Exception as e:
-            print(f"Error loading image: {e}")
+            self.logger.error(f"Error loading image: {e}", exc_info=True)
             # Add error message if image fails to load
             error_text = canvas.create_text(
                 x, y + total_height,
@@ -90,24 +94,27 @@ class ImageContent(IBubbleContent):
         return (content_width, total_height)
     
     def _load_image(self) -> Optional[Image.Image]:
-        """Load and process the image data."""
+        """Load image from cache or from URL."""
         try:
-            if self.image_url in image_cache:
-                return Image.open(io.BytesIO(image_cache[f"{self.image_url}_original"]))
+            # Check cache first
+            cached_image = self._cache.get(self.image_url)
+            if cached_image:
+                self.logger.info(f"Using cached image for {self.image_url}")
+                return cached_image
             
+            # If not in cache, fetch from URL
+            self.logger.info(f"Fetching image from URL: {self.image_url}")
             response = requests.get(self.image_url, timeout=5)
             response.raise_for_status()
             
-            # Process image data
-            image_data = Image.open(io.BytesIO(response.content))
+            # Save to cache
+            self._cache.save(self.image_url, response.content)
             
-            # Cache original image data
-            image_cache[f"{self.image_url}_original"] = response.content
-            
-            return image_data
+            # Return the image
+            return Image.open(io.BytesIO(response.content))
             
         except Exception as e:
-            print(f"Error loading image: {e}")
+            self.logger.error(f"Error loading image from {self.image_url}: {e}", exc_info=True)
             return None
     
     def _show_image_preview(self, canvas: tk.Canvas) -> None:
@@ -118,15 +125,9 @@ class ImageContent(IBubbleContent):
             preview.title("Image Preview")
             
             # Load original image
-            if f"{self.image_url}_original" in image_cache:
-                image_data = Image.open(
-                    io.BytesIO(image_cache[f"{self.image_url}_original"])
-                )
-            else:
-                response = requests.get(self.image_url, timeout=5)
-                response.raise_for_status()
-                image_data = Image.open(io.BytesIO(response.content))
-                image_cache[f"{self.image_url}_original"] = response.content
+            image_data = self._load_image()
+            if not image_data:
+                return
             
             # Calculate dimensions
             screen_width = canvas.winfo_screenwidth()
@@ -143,7 +144,7 @@ class ImageContent(IBubbleContent):
             new_height = int(image_data.height * scale)
             
             # Resize and create PhotoImage
-            resized = image_data.resize((new_width, new_height), Image.LANCZOS)
+            resized = image_data.resize((new_width, new_height), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(resized)
             
             # Create and pack label
@@ -159,4 +160,4 @@ class ImageContent(IBubbleContent):
             )
             
         except Exception as e:
-            print(f"Error showing preview: {e}")
+            self.logger.error(f"Error showing preview: {e}", exc_info=True)

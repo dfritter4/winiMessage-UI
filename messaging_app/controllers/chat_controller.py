@@ -1,19 +1,14 @@
+# controllers/chat_controller.py
 import asyncio
 import logging
-from typing import Optional, Dict
-from datetime import datetime
-
-from messaging_app.domain import (
-    IEventBus,
-    IStateManager,
-    Event,
-    EventType,
-    Message,
-    Thread,
-    ConnectionState,
-    AppState
-)
 from messaging_app.config import AppConfig
+from messaging_app.domain import (
+    Event, 
+    EventType, 
+    ConnectionState,
+    IEventBus,
+    IStateManager
+)
 from messaging_app.services import (
     MessageService,
     ThreadManager,
@@ -21,11 +16,15 @@ from messaging_app.services import (
     UIManager,
     ErrorHandler
 )
+from .message_handler import MessageHandler
+from .thread_handler import ThreadHandler
+from .state_handler import StateHandler
+from .ui_handler import UIEventHandler
 
 class ChatController:
     """
-    Main controller for the chat application.
-    Handles coordination between UI events, message handling, and state management.
+    Main controller that orchestrates message handling, thread management,
+    and UI updates through specialized handlers.
     """
     
     def __init__(
@@ -39,374 +38,170 @@ class ChatController:
         ui_manager: UIManager,
         error_handler: ErrorHandler
     ):
+        # Initialize handlers
+        self.message_handler = MessageHandler(
+            message_service, message_display, thread_manager, error_handler, event_bus
+        )
+        self.thread_handler = ThreadHandler(
+            thread_manager, message_display, ui_manager, error_handler, event_bus
+        )
+        self.state_handler = StateHandler(state_manager)
+        self.ui_handler = UIEventHandler(
+            message_display, thread_manager, error_handler
+        )
+        
         self.config = config
         self.event_bus = event_bus
-        self.state_manager = state_manager
-        self.message_service = message_service
-        self.thread_manager = thread_manager
-        self.message_display = message_display
-        self.ui_manager = ui_manager
         self.error_handler = error_handler
-        
         self.logger = logging.getLogger(__name__)
         self._polling_active = False
-        self._current_thread: Optional[Thread] = None
         
         # Set up event handlers
         self._setup_event_handlers()
 
     def _setup_event_handlers(self) -> None:
-        """Set up handlers for various UI and system events."""
+        """Set up handlers for various events."""
         # Message Events
-        self.event_bus.subscribe(EventType.SEND_MESSAGE_REQUESTED, self._handle_send_message)
-        self.event_bus.subscribe(EventType.MESSAGE_RECEIVED, self._handle_message_received)
-        self.event_bus.subscribe(EventType.MESSAGE_DELETED, self._handle_message_deleted)
-        self.event_bus.subscribe(EventType.MESSAGE_EDITED, self._handle_message_edited)
-        self.event_bus.subscribe(EventType.MESSAGE_SEARCH_REQUESTED, self._handle_message_search)
+        self.event_bus.subscribe(
+            EventType.SEND_MESSAGE_REQUESTED,
+            self._handle_send_message_event
+        )
+        self.event_bus.subscribe(
+            EventType.MESSAGE_RECEIVED,
+            self._handle_message_received_event
+        )
         
         # Thread Events
-        self.event_bus.subscribe(EventType.THREAD_SELECTED, self._handle_thread_selected)
-        self.event_bus.subscribe(EventType.NEW_CHAT_REQUESTED, self._handle_new_chat)
-        self.event_bus.subscribe(EventType.THREAD_UPDATED, self._handle_thread_updated)
-        self.event_bus.subscribe(EventType.THREAD_DELETED, self._handle_thread_deleted)
+        self.event_bus.subscribe(
+            EventType.THREAD_SELECTED,
+            self._handle_thread_selected_event
+        )
+        self.event_bus.subscribe(
+            EventType.NEW_CHAT_REQUESTED,
+            self._handle_new_chat_event
+        )
+        
+        # UI Events
+        self.event_bus.subscribe(
+            EventType.UI_REFRESH_REQUESTED,
+            self._handle_ui_refresh_event
+        )
+        self.event_bus.subscribe(
+            EventType.ERROR_OCCURRED,
+            self.ui_handler.handle_error
+        )
+        
+        # State Events
+        self.event_bus.subscribe(
+            EventType.CONNECTION_CHANGED,
+            self._handle_connection_change_event
+        )
         
         # System Events
-        self.event_bus.subscribe(EventType.ERROR_OCCURRED, self._handle_error)
-        self.event_bus.subscribe(EventType.CONNECTION_CHANGED, self._handle_connection_change)
-        self.event_bus.subscribe(EventType.SHUTDOWN_REQUESTED, self._handle_shutdown)
-        self.event_bus.subscribe(EventType.UI_REFRESH_REQUESTED, self._handle_ui_refresh)
+        self.event_bus.subscribe(
+            EventType.SHUTDOWN_REQUESTED,
+            lambda e: self.shutdown()
+        )
+
+    def _handle_send_message_event(self, event: Event) -> None:
+        asyncio.get_event_loop().create_task(
+            self.message_handler.send_message(
+                self.thread_handler.current_thread.guid if self.thread_handler.current_thread else None,
+                event.data.get("message", "").strip()
+            )
+        )
+
+    def _handle_message_received_event(self, event: Event) -> None:
+        asyncio.get_event_loop().create_task(
+            self.message_handler.handle_message_received(event)
+        )
+
+    def _handle_thread_selected_event(self, event: Event) -> None:
+        asyncio.get_event_loop().create_task(
+            self.thread_handler.select_thread(event.data.get("thread_name"))
+        )
+
+    def _handle_new_chat_event(self, event: Event) -> None:
+        asyncio.get_event_loop().create_task(
+            self.thread_handler.create_thread(
+                event.data.get("phone_number"),
+                event.data.get("display_name")
+            )
+        )
+
+    def _handle_ui_refresh_event(self, event: Event) -> None:
+        asyncio.get_event_loop().create_task(
+            self.ui_handler.handle_ui_refresh(event)
+        )
+
+    def _handle_connection_change_event(self, event: Event) -> None:
+        self.state_handler.update_connection_state(event.data.get("state"))
 
     async def initialize(self) -> None:
         """Initialize the chat controller and start background tasks."""
         try:
             # Update application state
-            self._update_state(ConnectionState.CONNECTING)
+            self.state_handler.update_connection_state(ConnectionState.CONNECTING.value)
             
             # Initialize threads
-            await self.thread_manager.initialize_threads()
+            try:
+                await self.thread_handler.thread_manager.initialize_threads()
+            except Exception as e:
+                self.logger.error(f"Error initializing threads: {e}", exc_info=True)
+                self.error_handler.handle_error(e, "thread_initialization")
             
-            # Update state to connected
-            self._update_state(ConnectionState.CONNECTED)
-            
-            # Start message polling
+            # Start polling
             self._start_polling()
             
+            # Update state to connected
+            self.state_handler.update_connection_state(ConnectionState.CONNECTED.value)
+            
         except Exception as e:
+            self.logger.error(f"Error in controller initialization: {e}", exc_info=True)
             self.error_handler.handle_error(e, "controller_initialization")
-            self._update_state(ConnectionState.ERROR)
+            self.state_handler.update_connection_state(ConnectionState.ERROR.value)
 
     def _start_polling(self) -> None:
         """Start the message polling loop."""
         if not self._polling_active:
             self._polling_active = True
-            self._update_state_polling(True)
+            self.state_handler.update_polling_state(True)
             asyncio.create_task(self._polling_loop())
+
+    async def poll_messages(self) -> None:
+        """Poll for new messages (public interface used by app_lifecycle)."""
+        try:
+            updates = await self.message_handler.message_service.poll_messages()
+            if updates:
+                for thread_guid, messages in updates.items():
+                    await self.thread_handler.thread_manager.update_thread(thread_guid, messages)
+        except Exception as e:
+            self.error_handler.handle_error(e, "message_polling")
 
     async def _polling_loop(self) -> None:
         """Background loop for polling messages."""
         while self._polling_active:
             try:
-                updates = await self.message_service.poll_messages()
-                if updates:
-                    for thread_guid, messages in updates.items():
-                        await self.thread_manager.update_thread(thread_guid, messages)
-                
+                await self.poll_messages()
                 await asyncio.sleep(self.config.network.poll_interval)
-                
             except Exception as e:
                 self.error_handler.handle_error(e, "message_polling")
                 await asyncio.sleep(self.config.network.poll_interval * 2)  # Back off on error
 
-    async def _handle_send_message(self, event: Event) -> None:
-        """Handle message send requests."""
-        try:
-            if not self._current_thread:
-                self.event_bus.publish(Event(
-                    EventType.DISPLAY_ERROR,
-                    {"message": "Please select a chat first."}
-                ))
-                return
-
-            message_text = event.data.get("message", "").strip()
-            if not message_text:
-                return
-
-            success = await self.message_service.send_message(
-                self._current_thread.guid,
-                message_text
-            )
-
-            if success:
-                message = Message(
-                    text=message_text,
-                    sender_name="Me",  # Should come from user settings
-                    timestamp=datetime.now().timestamp(),
-                    direction="outgoing",
-                    thread_name=self._current_thread.name
-                )
-
-                await self.thread_manager.update_thread(
-                    self._current_thread.guid,
-                    [message]
-                )
-
-                self.message_display.display_message(message)
-                self.message_display.scroll_to_bottom()
-
-        except Exception as e:
-            self.error_handler.handle_error(e, "send_message")
-
-    async def _handle_thread_selected(self, event: Event) -> None:
-        """Handle thread selection events."""
-        try:
-            thread_name = event.data.get("thread_name")
-            if not thread_name:
-                return
-
-            thread = await self.thread_manager.get_thread_by_name(thread_name)
-            if thread:
-                self._current_thread = thread
-                self.message_display.clear_display()
-                
-                # Display thread messages
-                for message in sorted(thread.messages, key=lambda m: m.timestamp):
-                    self.message_display.display_message(message)
-                
-                self.message_display.scroll_to_bottom()
-                self.message_display.set_current_thread(thread.guid)
-                
-                # Update state
-                self._update_current_thread(thread.guid)
-                
-        except Exception as e:
-            self.error_handler.handle_error(e, "thread_selection")
-
-    async def _handle_new_chat(self, event: Event) -> None:
-        """Handle new chat creation requests."""
-        try:
-            # Get recipient phone number
-            phone_number = self.ui_manager.ask_input(
-                "Enter recipient's phone number (e.g., +1234567890):",
-                "New Message"
-            )
-            
-            if not phone_number:
-                return
-
-            # Get optional display name
-            display_name = self.ui_manager.ask_input(
-                "Enter display name (optional):",
-                "New Message"
-            )
-
-            # Create new thread
-            thread = await self.thread_manager.create_thread(phone_number, display_name)
-            
-            # Update UI
-            self._current_thread = thread
-            self.message_display.clear_display()
-            self.message_display.set_current_thread(thread.guid)
-            
-            # Update state
-            self._update_current_thread(thread.guid)
-            
-        except Exception as e:
-            self.error_handler.handle_error(e, "new_chat_creation")
-
-    async def _handle_message_received(self, event: Event) -> None:
-        """Handle received messages."""
-        try:
-            thread_guid = event.data.get("thread_guid")
-            message = event.data.get("message")
-            
-            if not thread_guid or not message:
-                return
-
-            # Update current display if message is for current thread
-            if (self._current_thread and 
-                self._current_thread.guid == thread_guid):
-                self.message_display.display_message(message)
-                self.message_display.scroll_to_bottom()
-                
-        except Exception as e:
-            self.error_handler.handle_error(e, "message_received")
-
-    def _handle_error(self, event: Event) -> None:
-        """Handle error events."""
-        error_data = event.data
-        self.logger.error(
-            f"Error in {error_data.get('context', 'unknown')}: {error_data.get('error')}"
-        )
-        
-        # Update state if it's a connection error
-        if error_data.get('context') in ['connection', 'initialization']:
-            self._update_state(ConnectionState.ERROR)
-
-    def _handle_connection_change(self, event: Event) -> None:
-        """Handle connection state changes."""
-        new_state = event.data.get("state")
-        if new_state:
-            self._update_state(new_state)
-
-    async def _handle_message_search(self, event: Event) -> None:
-        """Handle message search requests."""
-        try:
-            search_term = event.data.get("search_term", "").strip()
-            if not search_term:
-                return
-
-            # Implement message search logic here
-            # This could search through current thread or all threads
-            pass
-            
-        except Exception as e:
-            self.error_handler.handle_error(e, "message_search")
-
-    async def _handle_message_deleted(self, event: Event) -> None:
-        """Handle message deletion events."""
-        try:
-            message_id = event.data.get("message_id")
-            thread_guid = event.data.get("thread_guid")
-            
-            if not message_id or not thread_guid:
-                return
-
-            # Remove from display if in current thread
-            if (self._current_thread and 
-                self._current_thread.guid == thread_guid):
-                self.message_display.remove_message(message_id)
-            
-        except Exception as e:
-            self.error_handler.handle_error(e, "message_deletion")
-
-    def _update_state(self, connection_state: ConnectionState) -> None:
-        """Update the application state."""
-        current_state = self.state_manager.get_state()
-        new_state = AppState(
-            connection_state=connection_state,
-            current_thread_guid=current_state.current_thread_guid,
-            is_polling=current_state.is_polling,
-            threads=current_state.threads
-        )
-        self.state_manager.update_state(new_state)
-
-    def _update_state_polling(self, is_polling: bool) -> None:
-        """Update the polling state."""
-        current_state = self.state_manager.get_state()
-        new_state = AppState(
-            connection_state=current_state.connection_state,
-            current_thread_guid=current_state.current_thread_guid,
-            is_polling=is_polling,
-            threads=current_state.threads
-        )
-        self.state_manager.update_state(new_state)
-
-    def _update_current_thread(self, thread_guid: str) -> None:
-        """Update the current thread in application state."""
-        current_state = self.state_manager.get_state()
-        new_state = AppState(
-            connection_state=current_state.connection_state,
-            current_thread_guid=thread_guid,
-            is_polling=current_state.is_polling,
-            threads=current_state.threads
-        )
-        self.state_manager.update_state(new_state)
-
-    async def _handle_message_edited(self, event: Event) -> None:
-        """Handle message edit events."""
-        try:
-            message_id = event.data.get("message_id")
-            new_text = event.data.get("new_text")
-            thread_guid = event.data.get("thread_guid")
-            
-            if not all([message_id, new_text, thread_guid]):
-                return
-                
-            # Update message in thread
-            await self.thread_manager.update_message(thread_guid, message_id, new_text)
-            
-            # Update display if in current thread
-            if (self._current_thread and 
-                self._current_thread.guid == thread_guid):
-                self.message_display.update_message(message_id, new_text)
-                
-        except Exception as e:
-            self.error_handler.handle_error(e, "message_edit")
-
-    async def _handle_thread_updated(self, event: Event) -> None:
-        """Handle thread update events."""
-        try:
-            thread_guid = event.data.get("thread_guid")
-            thread_data = event.data.get("thread_data")
-            
-            if not thread_guid or not thread_data:
-                return
-                
-            await self.thread_manager.update_thread_data(thread_guid, thread_data)
-            
-            # Refresh UI if current thread
-            if (self._current_thread and 
-                self._current_thread.guid == thread_guid):
-                self.event_bus.publish(Event(
-                    EventType.UI_REFRESH_REQUESTED,
-                    {"thread_guid": thread_guid}
-                ))
-                
-        except Exception as e:
-            self.error_handler.handle_error(e, "thread_update")
-
-    async def _handle_thread_deleted(self, event: Event) -> None:
-        """Handle thread deletion events."""
-        try:
-            thread_guid = event.data.get("thread_guid")
-            if not thread_guid:
-                return
-                
-            await self.thread_manager.delete_thread(thread_guid)
-            
-            # Clear display if current thread
-            if (self._current_thread and 
-                self._current_thread.guid == thread_guid):
-                self.message_display.clear_display()
-                self._current_thread = None
-                self._update_current_thread(None)
-                
-        except Exception as e:
-            self.error_handler.handle_error(e, "thread_deletion")
-
-    async def _handle_ui_refresh(self, event: Event) -> None:
-        """Handle UI refresh requests."""
-        try:
-            thread_guid = event.data.get("thread_guid")
-            if thread_guid and self._current_thread and self._current_thread.guid == thread_guid:
-                self.message_display.clear_display()
-                thread = await self.thread_manager.get_thread(thread_guid)
-                if thread:
-                    for message in sorted(thread.messages, key=lambda m: m.timestamp):
-                        self.message_display.display_message(message)
-                    self.message_display.scroll_to_bottom()
-                    
-        except Exception as e:
-            self.error_handler.handle_error(e, "ui_refresh")
-
-    def _handle_shutdown(self, event: Event) -> None:
-        """Handle application shutdown request."""
-        try:
-            self.shutdown()
-        except Exception as e:
-            self.error_handler.handle_error(e, "shutdown")
-
     def shutdown(self) -> None:
         """Clean shutdown of the controller."""
-        self._polling_active = False
-        self._update_state_polling(False)
-        self._update_state(ConnectionState.DISCONNECTED)
-        
-        # Publish shutdown completion event
-        self.event_bus.publish(Event(
-            EventType.STATE_CHANGED,
-            {
-                "state": ConnectionState.DISCONNECTED,
-                "reason": "shutdown"
-            }
-        ))
+        try:
+            self._polling_active = False
+            self.state_handler.update_polling_state(False)
+            self.state_handler.update_connection_state(ConnectionState.DISCONNECTED.value)
+            
+            # Publish shutdown completion event
+            self.event_bus.publish(Event(
+                EventType.STATE_CHANGED,
+                {
+                    "state": ConnectionState.DISCONNECTED,
+                    "reason": "shutdown"
+                }
+            ))
+        except Exception as e:
+            self.error_handler.handle_error(e, "shutdown")

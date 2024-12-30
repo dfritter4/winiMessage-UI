@@ -7,3 +7,5 @@ Requires-Dist: pillow
 Requires-Dist: requests
 Requires-Dist: typing
 Requires-Dist: dataclasses
+Requires-Dist: python-dateutil
+Requires-Dist: pillow-heif

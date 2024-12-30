@@ -36,3 +36,5 @@ class EventType(Enum):
     # System Events
     INITIALIZATION_COMPLETE = auto()
     SHUTDOWN_REQUESTED = auto()
+
+    THREAD_INITIALIZED = auto()

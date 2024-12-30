@@ -1,5 +1,6 @@
 import tkinter as tk
-from datetime import datetime
+import datetime
+import time as py_time
 from typing import Optional
 from ..config import AppConfig
 from .interfaces import IBubbleDrawer, IBubbleContent, IBubbleStyle
@@ -26,31 +27,39 @@ class DefaultBubbleStyle(IBubbleStyle):
 
 class DefaultBubbleDrawer(IBubbleDrawer):
     def draw_bubble(self, canvas: tk.Canvas, x: int, y: int, width: int, height: int, **kwargs) -> None:
-        is_outgoing = kwargs.get('is_outgoing', False)
-        style = kwargs.get('style')
-        if not style:
-            return
-            
-        color = style.get_background_color(is_outgoing)
-        radius = min(15, min(width, height) / 4)
+        """Draw the bubble shape on the canvas with properly rounded corners.
         
-        points = [
-            x + radius, y,
-            x + width - radius, y,
-            x + width, y,
-            x + width, y + radius,
-            x + width, y + height - radius,
-            x + width, y + height,
-            x + width - radius, y + height,
-            x + radius, y + height,
-            x, y + height,
-            x, y + height - radius,
-            x, y + radius,
-            x, y,
-            x + radius, y
-        ]
+        Args:
+            canvas: The canvas to draw on
+            x: The x coordinate to start drawing
+            y: The y coordinate to start drawing
+            width: The width of the bubble
+            height: The height of the bubble
+            **kwargs: Additional drawing arguments
+        """
+        radius = kwargs.get('radius', 12)
+        fill_color = kwargs.get('fill', '#E9E9EB')
+        outline = kwargs.get('outline', '')
         
-        canvas.create_polygon(points, smooth=True, fill=color)
+        # Right side
+        canvas.create_arc(width - 2*radius + x, y, width + x, 2*radius + y, 
+                         start=270, extent=90, fill=fill_color, outline=outline)  # Top-right corner
+        canvas.create_arc(width - 2*radius + x, height - 2*radius + y, width + x, height + y, 
+                         start=0, extent=90, fill=fill_color, outline=outline)    # Bottom-right corner
+        canvas.create_rectangle(width - radius + x, y, width + x, height + y,
+                              fill=fill_color, outline=outline)  # Right edge
+        
+        # Left side
+        canvas.create_arc(x, y, 2*radius + x, 2*radius + y,
+                         start=180, extent=90, fill=fill_color, outline=outline)  # Top-left corner
+        canvas.create_arc(x, height - 2*radius + y, 2*radius + x, height + y,
+                         start=90, extent=90, fill=fill_color, outline=outline)   # Bottom-left corner
+        canvas.create_rectangle(x, y, radius + x, height + y,
+                              fill=fill_color, outline=outline)  # Left edge
+        
+        # Center
+        canvas.create_rectangle(radius + x, y, width - radius + x, height + y,
+                              fill=fill_color, outline=outline)  # Center rectangle
 
 class BaseBubble(tk.Canvas):
     """Base class for message bubbles."""
@@ -121,36 +130,69 @@ class BaseBubble(tk.Canvas):
             return (bbox[3] - bbox[1] + 5) if bbox else 0
         return 0
 
-    def _add_sender_name(self, x: int, y: int) -> None:
-        """Add sender name if present."""
+    def _add_sender_name(self) -> int:
+        """Add sender name and return its height."""
         if self.sender_name and not self.is_outgoing:
-            self.create_text(
-                x, y,
+            text_item = self.create_text(
+                self.padding,
+                2,
                 text=self.sender_name,
                 anchor="nw",
                 fill=self.style.get_sender_name_color(),
-                font=(self.config.ui.font_family, 
-                      self.config.ui.font_sizes["sender"])
+                font=("SF Pro", 11, "bold")
             )
+            bbox = self.bbox(text_item)
+            return (bbox[3] - bbox[1] + 5) if bbox else 20  # Add padding
+        return 0
 
-    def _add_timestamp(self, x: int, y: int) -> None:
-        """Add timestamp if present."""
+
+    def _parse_timestamp(self, timestamp: Optional[str]) -> Optional[float]:
+        try:
+            if isinstance(timestamp, (int, float)):
+                return float(timestamp)
+            if isinstance(timestamp, str):
+                # Handle common timestamp formats
+                try:
+                    return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S").timestamp()
+                except ValueError:
+                    return datetime.fromisoformat(timestamp.replace('Z', '+00:00')).timestamp()
+            return None
+        except Exception as e:
+            self.logger.error(f"Error parsing timestamp: {timestamp}, {e}")
+            return None
+
+
+
+    def _add_timestamp(self, x: int, width: int, y_position: int) -> None:
+        """Add timestamp to the bubble."""
         if self.timestamp:
             try:
-                time_str = datetime.fromtimestamp(self.timestamp).strftime("%I:%M %p")
-                if time_str.startswith("0"):
+                # Convert timestamp to local time
+                # Use time.localtime if timestamp is a float
+                if isinstance(self.timestamp, (int, float)):
+                    time_struct = py_time.localtime(self.timestamp)
+                    time_str = py_time.strftime("%I:%M %p", time_struct).lower()
+                else:
+                    # Fallback to datetime if it's not a simple float
+                    time = datetime.fromtimestamp(float(self.timestamp))
+                    time_str = time.strftime("%I:%M %p").lower()
+                
+                # Remove leading zero from hour
+                if time_str.startswith('0'):
                     time_str = time_str[1:]
-                    
+                
                 self.create_text(
-                    x, y,
+                    x + width - self.padding,
+                    y_position,
                     text=time_str,
                     anchor="se",
                     fill=self.style.get_timestamp_color(),
-                    font=(self.config.ui.font_family, 
-                          self.config.ui.font_sizes["timestamp"])
+                    font=("SF Pro", 9)
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error formatting timestamp: {e}")
+                # Log the actual timestamp value for debugging
+                print(f"Problematic timestamp: {self.timestamp}, Type: {type(self.timestamp)}")
 
     def draw(self) -> None:
         """Draw the complete bubble with content."""
@@ -194,6 +236,7 @@ class BaseBubble(tk.Canvas):
             is_outgoing=self.is_outgoing,
             style=self.style
         )
+        
         
         # Add sender name
         if sender_height > 0:
