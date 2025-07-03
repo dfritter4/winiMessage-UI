@@ -109,10 +109,10 @@ function App() {
     try {
       setError(null);
       const data = await apiClient.getThreads();
-      // Filter out deleted threads
-      const filteredThreads = (data.threads || []).filter(
-        thread => !deletedThreads.includes(thread.thread_guid)
-      );
+      // Filter out deleted threads and sort by most recent
+      const filteredThreads = (data.threads || [])
+        .filter(thread => !deletedThreads.includes(thread.thread_guid))
+        .sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated));
       setThreads(filteredThreads);
       setIsOnline(true);
     } catch (err) {
@@ -122,10 +122,10 @@ function App() {
       if (threads.length === 0) {
         setError('Failed to connect to server. Using offline mode.');
         setIsOnline(false);
-        // Filter mock threads as well
-        const filteredMockThreads = mockThreads.filter(
-          thread => !deletedThreads.includes(thread.thread_guid)
-        );
+        // Filter mock threads as well and sort them too
+        const filteredMockThreads = mockThreads
+          .filter(thread => !deletedThreads.includes(thread.thread_guid))
+          .sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated));
         setThreads(filteredMockThreads);
       } else {
         // Keep existing threads, just show error
@@ -209,7 +209,20 @@ function App() {
 
   const handleThreadSelect = async (thread) => {
     console.log('Thread selected:', thread);
-    setSelectedThread(thread);
+    
+    // Clear unread count immediately when thread is selected
+    const updatedThread = { ...thread, unread_count: 0 };
+    setSelectedThread(updatedThread);
+    
+    // Update the thread in the threads list to clear unread count
+    setThreads(prevThreads => 
+      prevThreads.map(t => 
+        t.thread_guid === thread.thread_guid 
+          ? { ...t, unread_count: 0 }
+          : t
+      )
+    );
+    
     setMessages([]); // Clear messages while loading
     
     if (isOnline) {
@@ -230,7 +243,7 @@ function App() {
 
     try {
       setError(null);
-      await apiClient.sendMessage(selectedThread.thread_guid, messageData.text);
+      await apiClient.sendMessage(selectedThread.thread_guid, messageData);
       
       console.log('Message sent successfully, refreshing...');
       await fetchMessages(selectedThread.thread_guid);

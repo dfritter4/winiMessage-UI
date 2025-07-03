@@ -22,8 +22,8 @@ function ClickableText({ text, isOutgoing, onLinkClick }) {
       onLinkClick(url);
     } else {
       // Default behavior: open in external browser
-      if (window.electron) {
-        window.electron.shell.openExternal(url);
+      if (window.electronAPI) {
+        window.electronAPI.openExternal(url);
       } else {
         window.open(url, '_blank', 'noopener,noreferrer');
       }

@@ -83,11 +83,19 @@ class ApiClient {
     }
   }
 
-  async sendMessage(threadGuid, message) {
+  async sendMessage(threadGuid, messageData) {
     try {
       const encodedGuid = encodeURIComponent(threadGuid);
       const url = `/threads/${encodedGuid}/send`;
-      const payload = { message: message };
+      
+      // Build payload based on what's provided
+      const payload = {};
+      if (messageData.text) {
+        payload.message = messageData.text;
+      }
+      if (messageData.attachment) {
+        payload.attachment = messageData.attachment;
+      }
       
       console.log('Sending message to:', `${this.baseURL}${url}`);
       console.log('Thread GUID (original):', threadGuid);

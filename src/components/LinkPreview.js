@@ -85,6 +85,10 @@ function LinkPreview({ url, isOutgoing }) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    // Always fetch fresh metadata, don't use any cached version
+    setPreview(null);
+    setLoading(true);
+    setError(false);
     fetchLinkPreview(url);
   }, [url]);
 
@@ -93,17 +97,83 @@ function LinkPreview({ url, isOutgoing }) {
       setLoading(true);
       setError(false);
 
-      // Create enhanced preview based on domain
+      console.log('Fetching link preview for:', url);
+
+      // Use Electron main process to fetch (bypasses CORS)
+      if (window.electronAPI) {
+        const result = await window.electronAPI.fetchLinkPreview(url);
+        
+        if (result.success) {
+          console.log('HTML fetched successfully, length:', result.html.length);
+          const metadata = extractMetadata(result.html, url);
+          console.log('Extracted metadata:', metadata);
+          setPreview(metadata);
+        } else {
+          throw new Error(result.error);
+        }
+      } else {
+        // Fallback for non-Electron environments (web)
+        const response = await fetch(url, {
+          mode: 'cors',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const html = await response.text();
+        const metadata = extractMetadata(html, url);
+        setPreview(metadata);
+      }
+    } catch (err) {
+      console.log('Link preview failed, using fallback:', err);
+      // Fallback to enhanced preview
       const domain = extractDomainFromUrl(url);
       const preview = createEnhancedPreview(url, domain);
-      
+      console.log('Using fallback preview:', preview);
       setPreview(preview);
-    } catch (err) {
-      console.log('Link preview failed:', err);
-      setError(true);
     } finally {
       setLoading(false);
     }
+  };
+
+  const extractMetadata = (html, url) => {
+    // Create a temporary DOM parser
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // Extract title
+    let title = doc.querySelector('meta[property="og:title"]')?.content ||
+                doc.querySelector('meta[name="twitter:title"]')?.content ||
+                doc.querySelector('title')?.textContent ||
+                extractDomainFromUrl(url);
+
+    // Extract description  
+    let description = doc.querySelector('meta[property="og:description"]')?.content ||
+                     doc.querySelector('meta[name="twitter:description"]')?.content ||
+                     doc.querySelector('meta[name="description"]')?.content ||
+                     '';
+
+    // Extract image
+    let image = doc.querySelector('meta[property="og:image"]')?.content ||
+               doc.querySelector('meta[name="twitter:image"]')?.content ||
+               null;
+
+    // Make image URL absolute if relative
+    if (image && !image.startsWith('http')) {
+      const baseUrl = new URL(url);
+      image = new URL(image, baseUrl.origin).href;
+    }
+
+    return {
+      title: title.trim(),
+      description: description.trim().substring(0, 120) + (description.length > 120 ? '...' : ''),
+      image: image,
+      url: url
+    };
   };
 
   const createEnhancedPreview = (url, domain) => {
@@ -186,8 +256,8 @@ function LinkPreview({ url, isOutgoing }) {
 
   const handleClick = () => {
     // Open link in external browser
-    if (window.electron) {
-      window.electron.shell.openExternal(url);
+    if (window.electronAPI) {
+      window.electronAPI.openExternal(url);
     } else {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
